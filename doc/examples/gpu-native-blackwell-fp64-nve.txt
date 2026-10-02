@@ -1,0 +1,7 @@
+# Recorded RTX PRO 6000 Blackwell NVE same-binary FP64 check
+# Excerpt limited to NVE at 1, 2 and 4 ranks.
+ENS nve np1 FP64_BITWISE PASS  native A=native C=native
+ENS nve np2 FP64_BITWISE PASS  native A=native C=native
+ENS nve np4 FP64_BITWISE PASS  native A=native C=native
+# The corresponding NVE run audit:
+AUDIT PASS legs=6
