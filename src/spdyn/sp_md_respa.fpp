@@ -1397,6 +1397,20 @@ contains
                                vel, viri_const)
     end if
 
+    ! total force of this step for the group virial and RMSG of an output
+    ! step (compute_dynvars); the thermostat has formed it on its own steps
+    !
+    if (mod(istep-1, dynamics%eneout_period) == 0 .and. &
+        .not. calc_thermostat) then
+      do i = 1, ncell
+        do ix = 1, natom(i)
+          force(1,ix,i) = force_long(1,ix,i) + force_short(1,ix,i)
+          force(2,ix,i) = force_long(2,ix,i) + force_short(2,ix,i)
+          force(3,ix,i) = force_long(3,ix,i) + force_short(3,ix,i)
+        end do
+      end do
+    end if
+
     if (mod(istep-1, dynamics%eneout_period) == 0 .and. ensemble%group_tp) then
       viri_group(1:3,1:3) = 0.0_dp
       call compute_virial_group(constraints, ncell, nwater, water_list, &
@@ -3043,6 +3057,20 @@ contains
     domain%system_size(1) = boundary%box_size_x
     domain%system_size(2) = boundary%box_size_y
     domain%system_size(3) = boundary%box_size_z
+
+    ! total force of this step for RMSG of an output step (compute_dynvars);
+    ! the thermostat has formed it on its own steps
+    !
+    if (mod(istep-1, dynamics%eneout_period) == 0 .and. &
+        .not. calc_thermostat) then
+      do j = 1, ncell
+        do jx = 1, natom(j)
+          force(1,jx,j) = force_long(1,jx,j) + force_short(1,jx,j)
+          force(2,jx,j) = force_long(2,jx,j) + force_short(2,jx,j)
+          force(3,jx,j) = force_long(3,jx,j) + force_short(3,jx,j)
+        end do
+      end do
+    end if
 
     return
 

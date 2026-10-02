@@ -1774,6 +1774,14 @@ contains
     !
     ncell_boundary = icel_local
 
+    ! local cell indices are stored as integer(int2) (cell_g2l, cell_g2b,
+    ! cell_gxyz2l, cell_pair, id_g2l)
+    !
+    if (ncell + ncell_boundary > huge(1_int2)) &
+      call error_msg('Setup_Cell_Boundary> too many cells in one domain '// &
+                     '(local + boundary > 32767): use more domains or a '// &
+                     'longer pairlistdist')
+
     do i = 1, ncell_boundary
       icel = i + ncell
       if (cell_l2gx(icel) .eq. 0) cell_pbc_move(1,icel) = -1.0_wp

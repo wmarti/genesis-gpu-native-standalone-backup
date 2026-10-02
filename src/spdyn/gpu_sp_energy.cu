@@ -35,7 +35,7 @@ typedef unsigned char  uchar;
 #define coord_pbc(X,Y)            _coord_pbc           [CALIDX2((X)-1,atom_domain, (Y)-1,4)]
 #define force(X,Y)                _force               [CALIDX2((X)-1,atom_domain, (Y)-1,3)]
 #define atmcls_pbc(X)             _atmcls_pbc          [(X)-1]
-#define cell_move(X,Y,Z)          _cell_move           [CALIDX3((X)-1,3, (Y)-1,ncel_max, (Z)-1,ncel_max)]
+#define cell_move(X,Y,Z)          _cell_move           [CALIDX3((X)-1,3, (Y)-1,(size_t)ncel_max, (Z)-1,ncel_max)]
 #define natom(Z)                  _natom               [(Z)-1]
 #define start_atom(Z)             _start_atom          [(Z)-1]
 #define nonb_lj12(Y,Z)            _nonb_lj12           [CALIDX2((Y)-1,num_atom_cls, (Z)-1,num_atom_cls)]
@@ -44,13 +44,13 @@ typedef unsigned char  uchar;
 #define table_ene(Z)              _table_ene           [(Z)-1]
 #define table_grad(Z)             _table_grad          [(Z)-1]
 #define univ_cell_pairlist1(Y,Z)  _univ_cell_pairlist1 [CALIDX2((Y)-1,2, (Z)-1,univ_maxcell)]
-#define univ_mask2(Y,Z)           _univ_mask2          [CALIDX2((Y)-1,univ_mask2_size, (Z)-1,univ_ncell_near)]
+#define univ_mask2(Y,Z)           _univ_mask2          [CALIDX2((Y)-1,(size_t)univ_mask2_size, (Z)-1,univ_ncell_near)]
 #define univ_ix_list(Y,Z)         _univ_ix_list        [CALIDX2((Y)-1,MaxAtom, (Z)-1,ncel_max)]
 #define univ_iy_list(Y,Z)         _univ_iy_list        [CALIDX2((Y)-1,MaxAtom, (Z)-1,ncel_max)]
 #define univ_ix_natom(Z)          _univ_ix_natom       [(Z)-1]
 #define univ_iy_natom(Z)          _univ_iy_natom       [(Z)-1]
 #define univ_ij_sort_list(Z)      _univ_ij_sort_list   [(Z)-1]
-#define virial_check(Y,Z)         _virial_check        [CALIDX2((Y)-1,ncel_max, (Z)-1,ncel_max)]
+#define virial_check(Y,Z)         _virial_check        [CALIDX2((Y)-1,(size_t)ncel_max, (Z)-1,ncel_max)]
 
 #define ene_virial(Z)      _ene_virial[(Z)-1]
 #define ene_viri_mid(Y,Z)  _ene_viri_mid[CALIDX2((Y)-1,5, (Z)-1,univ_maxcell)]
@@ -10271,15 +10271,29 @@ void gpu_upload_charge_( const REAL *coord_pbc) {
   gpu_upload_charge( coord_pbc );
 }
 
+/*
+ * The byte count is 64-bit: callers pass products such as ncell*ncell*4,
+ * which exceed 2^31 for large single-rank cell grids (28^3 cells).  A failed
+ * registration is reported here and taken off the runtime's last-error slot,
+ * so that it is neither silent nor mistaken later for a device fault; the
+ * buffer then stays pageable, which only slows its transfers.
+ */
 extern "C"
 int set_pinned_memory_(
-        void *ptr,
-        int *insize
+        void    *ptr,
+        int64_t *insize
         )
 {
-    size_t size = *insize;
-    cudaHostRegister( ptr, size, cudaHostRegisterPortable );
-    return 0;
+    if ( *insize <= 0 ) return 0;
+    cudaError_t err = cudaHostRegister( ptr, (size_t)*insize,
+                                        cudaHostRegisterPortable );
+    if ( err == cudaSuccess ) return 0;
+    cudaGetLastError();
+    if ( err != cudaErrorHostMemoryAlreadyRegistered )
+        fprintf( stderr, "set_pinned_memory> WARNING: cudaHostRegister of "
+                 "%lld bytes failed (%s); the buffer stays pageable\n",
+                 (long long)*insize, cudaGetErrorString( err ) );
+    return 1;
 }
 
 extern "C"
@@ -10287,8 +10301,15 @@ int unset_pinned_memory_(
         void *ptr
         )
 {
-    cudaHostUnregister( ptr );
-    return 0;
+    cudaError_t err = cudaHostUnregister( ptr );
+    if ( err == cudaSuccess ) return 0;
+    cudaGetLastError();
+    /* not registered: its registration failed (reported above) or was
+     * skipped for an empty buffer */
+    if ( err != cudaErrorHostMemoryNotRegistered )
+        fprintf( stderr, "unset_pinned_memory> WARNING: cudaHostUnregister "
+                 "failed (%s)\n", cudaGetErrorString( err ) );
+    return 1;
 }
 
 #define BLOCK_SIZE 256
@@ -10358,7 +10379,7 @@ void gpu_copy_mask2(
 
     const int blockCount = (copysize+BLOCK_SIZE-1)/BLOCK_SIZE;
     gpu_unpack_data<<<blockCount, BLOCK_SIZE, 0, stream[in_stream_no]>>>
-                                 ((unsigned int *)(dev_univ_mask2+start_pack*8),
+                                 ((unsigned int *)(dev_univ_mask2+(size_t)start_pack*8),
                                   (int8_t *)(dev_pack_univ_mask2+start_pack),
                                   (size_t)(end_pack - start_pack + 1));
 
@@ -10392,8 +10413,8 @@ void gpu_allocate_packdata(
     )
 {
     size_t size_pack_univ_mask2;
-    size_pack_univ_mask2 = sizeof(int8_t)*(univ_mask2_size * univ_ncell_near+7)/8;
-    size_univ_mask2      = sizeof(int8_t)* univ_mask2_size * univ_ncell_near;
+    size_pack_univ_mask2 = sizeof(int8_t)*((size_t)univ_mask2_size * univ_ncell_near+7)/8;
+    size_univ_mask2      = sizeof(int8_t)*(size_t)univ_mask2_size * univ_ncell_near;
 
     if (max_size_univ_mask2 < size_univ_mask2){
         max_size_univ_mask2 = size_univ_mask2;
@@ -10402,13 +10423,27 @@ void gpu_allocate_packdata(
             dev_univ_mask2 = NULL;
         }
         size_t malloc_size = size_pack_univ_mask2 * 8;
-        CUDA_CALL( cudaMalloc_WN( (void**) &dev_univ_mask2, malloc_size ) );
+        cudaError_t err = cudaMalloc_WN( (void**) &dev_univ_mask2, malloc_size );
 
-        if ( dev_pack_univ_mask2 ) {
-            CUDA_CALL( cudaFree( dev_pack_univ_mask2 ) );
-            dev_pack_univ_mask2 = NULL;
+        if ( err == cudaSuccess ) {
+            if ( dev_pack_univ_mask2 ) {
+                CUDA_CALL( cudaFree( dev_pack_univ_mask2 ) );
+                dev_pack_univ_mask2 = NULL;
+            }
+            err = cudaMalloc_WN( (void**) &dev_pack_univ_mask2, size_pack_univ_mask2 );
         }
-        CUDA_CALL( cudaMalloc_WN( (void**) &dev_pack_univ_mask2, size_pack_univ_mask2 ) );
+        if ( err != cudaSuccess ) {
+            size_t mem_free = 0, mem_total = 0;
+            cudaGetLastError();
+            cudaMemGetInfo( &mem_free, &mem_total );
+            fprintf( stderr, "gpu_allocate_packdata> cannot allocate the exclusion "
+                     "mask of %d near cell pairs x %d atom pairs: %zu + %zu bytes "
+                     "(%s; device free %zu of %zu bytes)\n",
+                     univ_ncell_near, univ_mask2_size, malloc_size,
+                     size_pack_univ_mask2, cudaGetErrorString( err ),
+                     mem_free, mem_total );
+            exit(-1);
+        }
     }
 }
 
@@ -10423,6 +10458,33 @@ void gpu_allocate_packdata_(
         _pack_univ_mask2,
         *univ_mask2_size,
         *univ_ncell_near);
+}
+
+/*
+ * The device-native core (gpu_resident) calls this once its own first
+ * force is done and the stock loop will not run again: the stock pair-list
+ * and nonbond buffers are read by that loop and the step-0 force only.
+ */
+extern "C"
+void gpu_release_stock_buffers_( )
+{
+    void **buf[] = {
+        (void**)&dev_coord_pbc, (void**)&dev_atmcls_pbc, (void**)&dev_force,
+        (void**)&dev_ene_virial, (void**)&dev_cell_move, (void**)&dev_natom,
+        (void**)&dev_start_atom, (void**)&dev_nonb_lj12, (void**)&dev_nonb_lj6,
+        (void**)&dev_nonb_lj6_factor, (void**)&dev_table_ene,
+        (void**)&dev_table_grad, (void**)&dev_univ_cell_pairlist1,
+        (void**)&dev_univ_ix_natom, (void**)&dev_univ_ix_list,
+        (void**)&dev_univ_iy_natom, (void**)&dev_univ_iy_list,
+        (void**)&dev_univ_ij_sort_list, (void**)&dev_virial_check,
+        (void**)&dev_ene_viri_mid, (void**)&dev_univ_mask2,
+        (void**)&dev_pack_univ_mask2, (void**)&dev_fepgrp_pbc,
+        (void**)&dev_fep_mask, (void**)&dev_table_sclj, (void**)&dev_table_scel };
+    for (void **p : buf) {
+        CUDA_CALL( cudaFree( *p ) );
+        *p = NULL;
+    }
+    max_size_univ_mask2 = 0;
 }
 
 /*

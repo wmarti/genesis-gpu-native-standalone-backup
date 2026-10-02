@@ -1016,14 +1016,14 @@ contains
       do iy = id+1, ngrid(2), nthread
         do iz = 1, ngrid(3)
           k = iz + (iy-1)*ngrid(3)+(ix-1)*ngrid(3)*ngrid(2)
-          ftqdf(k) = ftqdf(k) * cmplx(theta(iz,iy,ix),0.0_wp)
+          ftqdf(k) = ftqdf(k) * cmplx(theta(iz,iy,ix),0.0_wp,kind=wp)
         end do
       end do
     end do
     do iy = 1, y_local1
       do iz = id+1, ngrid(3), nthread
         k = iz + (iy-1)*ngrid(3)
-        ftqdf2(k) = ftqdf2(k) * cmplx(theta1(iz,iy),0.0_wp)
+        ftqdf2(k) = ftqdf2(k) * cmplx(theta1(iz,iy),0.0_wp,kind=wp)
       end do
     end do
 
@@ -1474,14 +1474,14 @@ contains
       do iy = id+1, ngrid(2), nthread
         do iz = 1, ngrid(3)
           k = iz + (iy-1)*ngrid(3)+(ix-1)*ngrid(3)*ngrid(2)
-          ftqdf(k) = ftqdf(k) * cmplx(theta(iz,iy,ix),0.0_wp)
+          ftqdf(k) = ftqdf(k) * cmplx(theta(iz,iy,ix),0.0_wp,kind=wp)
         end do
       end do
     end do
     do iy = 1, y_local1
       do iz = id+1, ngrid(3), nthread
         k = iz + (iy-1)*ngrid(3)
-        ftqdf2(k) = ftqdf2(k) * cmplx(theta1(iz,iy),0.0_wp)
+        ftqdf2(k) = ftqdf2(k) * cmplx(theta1(iz,iy),0.0_wp,kind=wp)
       end do
     end do
 
@@ -1993,14 +1993,14 @@ contains
       do iy = id+1, ngrid(2), nthread
         do iz = 1, ngrid(3)
           k = iz + (iy-1)*ngrid(3)+(ix-1)*ngrid(3)*ngrid(2)
-          ftqdf(k) = ftqdf(k) * cmplx(theta(iz,iy,ix),0.0_wp)
+          ftqdf(k) = ftqdf(k) * cmplx(theta(iz,iy,ix),0.0_wp,kind=wp)
         end do
       end do
     end do
     do iy = 1, y_local1
       do iz = id+1, ngrid(3), nthread
         k = iz + (iy-1)*ngrid(3)
-        ftqdf2(k) = ftqdf2(k) * cmplx(theta1(iz,iy),0.0_wp)
+        ftqdf2(k) = ftqdf2(k) * cmplx(theta1(iz,iy),0.0_wp,kind=wp)
       end do
     end do
 

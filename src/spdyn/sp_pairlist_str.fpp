@@ -236,11 +236,11 @@ contains
                  pairlist%univ_iy_list(MaxAtom, univ_maxcell1),   &
                  stat = alloc_stat)
 #ifdef USE_GPU
-        call set_pinned_memory(pairlist%univ_ij_sort_list, univ_maxcell1*4)
-        call set_pinned_memory(pairlist%univ_ix_natom, univ_maxcell1*4)
-        call set_pinned_memory(pairlist%univ_iy_natom, univ_maxcell1*4)
-        call set_pinned_memory(pairlist%univ_ix_list, MaxAtom*univ_maxcell1)
-        call set_pinned_memory(pairlist%univ_iy_list, MaxAtom*univ_maxcell1)
+        call set_pinned_memory(pairlist%univ_ij_sort_list, int(univ_maxcell1,8)*4)
+        call set_pinned_memory(pairlist%univ_ix_natom, int(univ_maxcell1,8)*4)
+        call set_pinned_memory(pairlist%univ_iy_natom, int(univ_maxcell1,8)*4)
+        call set_pinned_memory(pairlist%univ_ix_list, int(MaxAtom,8)*univ_maxcell1)
+        call set_pinned_memory(pairlist%univ_iy_list, int(MaxAtom,8)*univ_maxcell1)
 #endif
       end if
 

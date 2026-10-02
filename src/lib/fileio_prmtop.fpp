@@ -1948,6 +1948,9 @@ contains
 
         else if (keyword .eq. 'DIHEDRAL_PERIODICITY') then
           read(line(start:end),fmt10) prmtop%dihe_perio_uniq(count)
+          ! a negative periodicity only marks that more terms of the same
+          ! dihedral follow; the term's periodicity is its absolute value
+          prmtop%dihe_perio_uniq(count) = abs(prmtop%dihe_perio_uniq(count))
 
         else if (keyword .eq. 'DIHEDRAL_PHASE') then
           read(line(start:end),fmt10) prmtop%dihe_phase_uniq(count)

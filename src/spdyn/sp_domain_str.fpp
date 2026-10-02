@@ -477,7 +477,7 @@ contains
                  domain%istcell_pairlist2        (var_size), &
                  stat = alloc_stat)
 #ifdef USE_GPU
-        call set_pinned_memory(domain%cell_move, 3*var_size*var_size)
+        call set_pinned_memory(domain%cell_move, int(3,8)*var_size*var_size)
 #endif
       end if
 
@@ -511,8 +511,8 @@ contains
                  domain%virial_cellpair(3, var_size),         &
                  stat = alloc_stat)
 #ifdef USE_GPU
-        call set_pinned_memory(domain%cell_pairlist1, 2*var_size*2)
-        call set_pinned_memory(domain%cell_pairlist2, var_size1*var_size1*4)
+        call set_pinned_memory(domain%cell_pairlist1, int(2,8)*var_size*2)
+        call set_pinned_memory(domain%cell_pairlist2, int(var_size1,8)*var_size1*4)
 #endif
       end if
       domain%cell_pairlist1(1:2, 1:var_size)          = 0
@@ -537,8 +537,8 @@ contains
                  domain%univ_cell_pairlist2(var_size1, var_size1), &
                  stat = alloc_stat)
 #ifdef USE_GPU
-        call set_pinned_memory(domain%univ_cell_pairlist1, 2*var_size*4)
-        call set_pinned_memory(domain%univ_cell_pairlist2, var_size1*var_size1*4)
+        call set_pinned_memory(domain%univ_cell_pairlist1, int(2,8)*var_size*4)
+        call set_pinned_memory(domain%univ_cell_pairlist2, int(var_size1,8)*var_size1*4)
 #endif
       end if
       domain%univ_cell_pairlist1(1:2, 1:var_size)          = 0
@@ -591,8 +591,8 @@ contains
                  domain%random     (var_size), &
                  stat = alloc_stat)
 #ifdef USE_GPU
-        call set_pinned_memory(domain%num_atom, var_size*4)
-        call set_pinned_memory(domain%start_atom, var_size*4)
+        call set_pinned_memory(domain%num_atom, int(var_size,8)*4)
+        call set_pinned_memory(domain%start_atom, int(var_size,8)*4)
 #endif
       end if
       domain%num_atom   (1:var_size) = 0
@@ -634,16 +634,16 @@ contains
       if (allocated(domain%id_l2g)) then
         if (size(domain%id_l2g(MaxAtom,:)) /= var_size) then
 #ifdef USE_GPU
-          call unset_pinned_memory(domain%atom_cls_no)
-          call unset_pinned_memory(domain%coord)
-          call unset_pinned_memory(domain%trans_vec)
-          call unset_pinned_memory(domain%translated)
-          call unset_pinned_memory(domain%force_omp)
-          call unset_pinned_memory(domain%force_pbc)
-          call unset_pinned_memory(domain%charge)
+          if (domain%nonbond_kernel == NBK_GPU) then
+            call unset_pinned_memory(domain%atmcls_pbc)
+            call unset_pinned_memory(domain%coord_pbc)
+            call unset_pinned_memory(domain%translated)
+            call unset_pinned_memory(domain%force_pbc)
+          end if
 #endif
           if (domain%nonbond_kernel /= NBK_Fugaku .and. &
-              domain%nonbond_kernel /= NBK_Intel) then
+              domain%nonbond_kernel /= NBK_Intel  .and. &
+              domain%nonbond_kernel /= NBK_GPU) then
 
             deallocate(domain%id_l2g,        &
                        domain%id_l2g_solute, &
@@ -761,15 +761,18 @@ contains
         end if
 
 #ifdef USE_GPU
-        call set_pinned_memory(domain%atmcls_pbc, MaxAtom*var_size*4)
-        if (wp == sp) then
-          call set_pinned_memory(domain%coord_pbc ,3*MaxAtom*var_size*4)
-          call set_pinned_memory(domain%translated,4*MaxAtom*var_size*4)
-          call set_pinned_memory(domain%force_pbc, 3*MaxAtom*var_size*nthread*4)
-        else
-          call set_pinned_memory(domain%coord_pbc ,3*MaxAtom*var_size*8)
-          call set_pinned_memory(domain%translated,4*MaxAtom*var_size*8)
-          call set_pinned_memory(domain%force_pbc, 3*MaxAtom*var_size*nthread*8)
+        ! Only the GPU layout has all four transfer buffers.
+        if (domain%nonbond_kernel == NBK_GPU) then
+          call set_pinned_memory(domain%atmcls_pbc, int(MaxAtom,8)*var_size*4)
+          if (wp == sp) then
+            call set_pinned_memory(domain%coord_pbc ,int(3,8)*MaxAtom*var_size*4)
+            call set_pinned_memory(domain%translated,int(4,8)*MaxAtom*var_size*4)
+            call set_pinned_memory(domain%force_pbc, int(3,8)*MaxAtom*var_size*nthread*4)
+          else
+            call set_pinned_memory(domain%coord_pbc ,int(3,8)*MaxAtom*var_size*8)
+            call set_pinned_memory(domain%translated,int(4,8)*MaxAtom*var_size*8)
+            call set_pinned_memory(domain%force_pbc, int(3,8)*MaxAtom*var_size*nthread*8)
+          end if
         end if
 #endif
       end if
@@ -960,7 +963,7 @@ contains
                    stat = alloc_stat)
         end if
 #ifdef USE_GPU
-        call set_pinned_memory(domain%fepgrp_pbc, MaxAtom*var_size)
+        call set_pinned_memory(domain%fepgrp_pbc, int(MaxAtom,8)*var_size)
 #endif
       end if
 
@@ -1156,13 +1159,12 @@ contains
 #ifdef USE_GPU
         call unset_pinned_memory(domain%num_atom)
         call unset_pinned_memory(domain%start_atom)
-        call unset_pinned_memory(domain%atom_cls_no)
-        call unset_pinned_memory(domain%coord)
-        call unset_pinned_memory(domain%trans_vec)
-        call unset_pinned_memory(domain%translated)
-        call unset_pinned_memory(domain%force_omp)
-        call unset_pinned_memory(domain%force_pbc)
-        call unset_pinned_memory(domain%charge)
+        if (domain%nonbond_kernel == NBK_GPU) then
+          call unset_pinned_memory(domain%atmcls_pbc)
+          call unset_pinned_memory(domain%coord_pbc)
+          call unset_pinned_memory(domain%translated)
+          call unset_pinned_memory(domain%force_pbc)
+        end if
 #endif
         if (domain%nonbond_kernel /= NBK_Fugaku .and. & 
             domain%nonbond_kernel /= NBK_Intel  .and. &

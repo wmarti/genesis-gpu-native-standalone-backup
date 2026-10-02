@@ -186,9 +186,18 @@ contains
       allocate(pairlist%univ_mask2(univ_mask2_size,univ_ncell_near))
       pairlist%univ_mask2_size = univ_mask2_size
 
-      pack_univ_mask2_size = (univ_mask2_size * univ_ncell_near + 7) / 8
+      ! the packed mask (one bit per atom pair of each near cell pair) is
+      ! indexed with default integers here and in send_mask_data
+      !
+      if ((int(univ_mask2_size,8) * univ_ncell_near + 7) / 8 > &
+          int(huge(pack_univ_mask2_size),8)) &
+        call error_msg('Update_Pairlist_Pbc_GPU> exclusion mask of the '//   &
+                       'near cell pairs exceeds 2^31 packed bytes: use '//   &
+                       'more domains or a shorter pairlistdist')
+      pack_univ_mask2_size = int((int(univ_mask2_size,8) * univ_ncell_near + 7) / 8)
       allocate(pairlist%pack_univ_mask2(pack_univ_mask2_size))
-      call set_pinned_memory(pairlist%pack_univ_mask2, pack_univ_mask2_size)
+      call set_pinned_memory(pairlist%pack_univ_mask2,                    &
+                             int(pack_univ_mask2_size,8))
       pairlist%pack_univ_mask2_size = pack_univ_mask2_size
     end if
     univ_natom_max = max_natom
@@ -359,21 +368,21 @@ contains
     integer,    intent(in)    :: univ_ncell_near
     integer(1), intent(inout) :: pack_univ_mask2(*)
 
-    integer                   :: all_size
-    integer                   :: div_index
+    integer(8)                :: all_size
+    integer(8)                :: div_index
 
 
-    all_size = univ_mask2_size*univ_ncell_near
-    div_index = int(all_size/2/8)*8
+    all_size = int(univ_mask2_size,8)*univ_ncell_near
+    div_index = (all_size/16)*8
 
 #ifdef USE_GPU
-    call pack_mask_data(univ_mask2,           1, div_index, pack_univ_mask2)
+    call pack_mask_data(univ_mask2,         1_8, div_index, pack_univ_mask2)
     call gpu_copy_mask2(pack_univ_mask2, univ_mask2_size, univ_ncell_near, &
-                        0, div_index/8-1, 1)
+                        0, int(div_index/8)-1, 1)
 
     call pack_mask_data(univ_mask2, div_index+1,  all_size, pack_univ_mask2)
     call gpu_copy_mask2(pack_univ_mask2, univ_mask2_size, univ_ncell_near, &
-                        div_index/8, pack_univ_mask2_size-1, 2)
+                        int(div_index/8), pack_univ_mask2_size-1, 2)
 #endif
 
     return
@@ -396,18 +405,19 @@ contains
 
     ! formal arguments
     integer(1), intent(in)    :: mask2(*)
-    integer,    intent(in)    :: start_index
-    integer,    intent(in)    :: end_index
+    integer(8), intent(in)    :: start_index
+    integer(8), intent(in)    :: end_index
     integer(1), intent(inout) :: pack_mask(*)
 
-    integer                        :: i,j,k
-    integer                        :: masksize
-    integer                        :: packblock_size
+    integer                        :: i,j
+    integer(8)                     :: k
+    integer(8)                     :: masksize
+    integer(8)                     :: packblock_size
     integer                        :: mod_size
-    integer                        :: packblock_offset
+    integer(8)                     :: packblock_offset
 
     integer(kind=1)                :: packed
-    integer                        :: offset_index
+    integer(8)                     :: offset_index
     integer                        :: base_index
     integer(kind=1)                :: setval
 
@@ -433,7 +443,7 @@ contains
     !$omp end parallel do
 
     ! Check if there is a remainder
-    mod_size = mod(masksize, 8)
+    mod_size = int(mod(masksize, 8_8))
     if (mod_size > 0) then
       setval = 1
       packed = 0

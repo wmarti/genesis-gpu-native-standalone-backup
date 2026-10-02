@@ -1329,7 +1329,7 @@ contains
         k = (iy-1)*ngrid(3) + (ix-1)*ngrid(3)*niy
         do iz = 1, ngrid(3)
           ftqdf_work(k+iz) = ftqdf_work2(iz,ix,iy) &
-                            *cmplx(theta(iz,iy,ix),0.0_wp)
+                            *cmplx(theta(iz,iy,ix),0.0_wp,kind=wp)
         end do
       end do
     end do
@@ -1861,9 +1861,9 @@ contains
         k = (iy-1)*ngrid(3) + (ix-1)*ngrid(3)*niy
         do iz = 1, ngrid(3)
           ftqdf_work(k+iz) = ftqdf_work2(iz,ix,iy) &
-                            *cmplx(theta(iz,iy,ix),0.0_wp)
+                            *cmplx(theta(iz,iy,ix),0.0_wp,kind=wp)
           ftldf_work(k+iz) = ftldf_work2(iz,ix,iy) &
-                            *cmplx(theta_lj(iz,iy,ix),0.0_wp)
+                            *cmplx(theta_lj(iz,iy,ix),0.0_wp,kind=wp)
         end do
       end do
     end do
@@ -2327,7 +2327,7 @@ contains
       do iy = id+1, niy, nthread
         k = (iy-1)*ngrid(3) + (ix-1)*ngrid(3)*niy
         do iz = 1, ngrid(3)
-          ftqdf_work(k+iz) = ftqdf_work2(iz,ix,iy)*cmplx(theta(iz,iy,ix),0.0_wp)
+          ftqdf_work(k+iz) = ftqdf_work2(iz,ix,iy)*cmplx(theta(iz,iy,ix),0.0_wp,kind=wp)
         end do
       end do
     end do
@@ -2875,9 +2875,9 @@ contains
         k = (iy-1)*ngrid(3) + (ix-1)*ngrid(3)*niy
         do iz = 1, ngrid(3)
           ftqdf_work(k+iz) = ftqdf_work2(iz,ix,iy) &
-                            *cmplx(theta(iz,iy,ix),0.0_wp)
+                            *cmplx(theta(iz,iy,ix),0.0_wp,kind=wp)
           ftldf_work(k+iz) = ftldf_work2(iz,ix,iy) &
-                            *cmplx(theta_lj(iz,iy,ix),0.0_wp)
+                            *cmplx(theta_lj(iz,iy,ix),0.0_wp,kind=wp)
         end do
       end do
     end do
@@ -3402,7 +3402,7 @@ contains
       do iy = id+1, niy, nthread
         k = (iy-1)*ngrid(3) + (ix-1)*ngrid(3)*niy
         do iz = 1, ngrid(3)
-          ftqdf_work(k+iz) = ftqdf_work2(iz,ix,iy)*cmplx(theta(iz,iy,ix),0.0_wp)
+          ftqdf_work(k+iz) = ftqdf_work2(iz,ix,iy)*cmplx(theta(iz,iy,ix),0.0_wp,kind=wp)
         end do
       end do
     end do
@@ -4010,9 +4010,9 @@ contains
         k = (iy-1)*ngrid(3) + (ix-1)*ngrid(3)*niy
         do iz = 1, ngrid(3)
           ftqdf_work(k+iz) = ftqdf_work2(iz,ix,iy) &
-                            *cmplx(theta(iz,iy,ix),0.0_wp)
+                            *cmplx(theta(iz,iy,ix),0.0_wp,kind=wp)
           ftldf_work(k+iz) = ftldf_work2(iz,ix,iy) &
-                            *cmplx(theta_lj(iz,iy,ix),0.0_wp)
+                            *cmplx(theta_lj(iz,iy,ix),0.0_wp,kind=wp)
         end do
       end do
     end do
