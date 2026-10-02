@@ -51,7 +51,7 @@ module sp_energy_pme_opt_2dalltoall_mod
   real(wp),         save :: r_scale(3)   ! coordinate-scaling factor (I/L)
   integer,          save :: n_bs         ! Order of B-spline
   integer,          save :: grid_bd      ! boundary grid number
-  integer,          save :: ngrid(4)     ! Number of grid
+  integer, public,  save :: ngrid(4)     ! Number of grid
   integer,          save :: nx           ! process number in x dimension
   integer,          save :: ny           ! process number in y dimension
   integer,          save :: nz           ! process number in z dimension

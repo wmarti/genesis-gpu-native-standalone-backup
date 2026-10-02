@@ -52,6 +52,9 @@ module sp_remd_mod
   use mpi
 #endif
   use sp_energy_pme_mod
+#ifdef USE_GPU
+  use sp_gpu_core_step_mod
+#endif
 
   implicit none
 #ifdef HAVE_MPI_GENESIS
@@ -2867,11 +2870,19 @@ contains
 
       ! output restart data
       !
+#ifdef USE_GPU
+      call gpu_core_remd_boundary(dynamics, dynvars, domain)
+#endif
       call output_remd(i, output, enefunc, domain, dynamics, dynvars, &
                        boundary, constraints, remd)
 
 
     end do
+
+#ifdef USE_GPU
+    ! the resident native context ends with the run
+    call gpu_core_remd_release(domain)
+#endif
 
     ! close output files
     !
@@ -3042,11 +3053,20 @@ contains
         if (remd%types(dimno) == RemdTemperature) then
           temp_j = remd%dparameters(dimno,parmidsets(parmsetid,dimno))
           factor = sqrt(temp_j/temp_i)
+#ifdef USE_GPU
+          ! a resident native context holds the velocities
+          if (gpu_core_remd_active()) then
+            call gpu_core_remd_rescale_velocity(factor)
+          else
+#endif
           do j = 1, domain%num_cell_local
             do jx = 1, domain%num_atom(j)
               domain%velocity(1:3,jx,j) = domain%velocity(1:3,jx,j) * factor
             end do
           end do
+#ifdef USE_GPU
+          end if
+#endif
 
           factor = temp_j/temp_i
           dynvars%thermostat_momentum                 &
@@ -3433,11 +3453,21 @@ contains
           if (i == my_country_no + 1) then
 
             factor = sqrt(temp_j/temp_i)
+#ifdef USE_GPU
+            ! a resident native context holds the velocities:
+            ! scale them where they are, by the same factor
+            if (gpu_core_remd_active()) then
+              call gpu_core_remd_rescale_velocity(factor)
+            else
+#endif
             do j = 1, domain%num_cell_local
               do jx = 1, domain%num_atom(j)
                 domain%velocity(1:3,jx,j) = domain%velocity(1:3,jx,j) * factor
               end do
             end do
+#ifdef USE_GPU
+            end if
+#endif
 
             factor = temp_j/temp_i
             dynvars%thermostat_momentum                 &

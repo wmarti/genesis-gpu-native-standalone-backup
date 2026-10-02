@@ -129,6 +129,8 @@ contains
     enefunc%pme_scheme        = ene_info%pme_scheme
     enefunc%pme_max_spacing   = ene_info%pme_max_spacing
     enefunc%dispersion_corr   = ene_info%dispersion_corr
+    enefunc%nonbond_precision = ene_info%nonbond_precision
+    enefunc%ewald_evaluation  = ene_info%ewald_evaluation
     enefunc%contact_check     = ene_info%contact_check
     enefunc%nonb_limiter      = ene_info%nonb_limiter
     enefunc%minimum_contact   = ene_info%minimum_contact
@@ -255,6 +257,8 @@ contains
     enefunc%pme_max_spacing   = ene_info%pme_max_spacing
     enefunc%pme_scheme        = ene_info%pme_scheme
     enefunc%dispersion_corr   = ene_info%dispersion_corr
+    enefunc%nonbond_precision = ene_info%nonbond_precision
+    enefunc%ewald_evaluation  = ene_info%ewald_evaluation
     enefunc%contact_check     = ene_info%contact_check
     enefunc%nonb_limiter      = ene_info%nonb_limiter
     enefunc%minimum_contact   = ene_info%minimum_contact

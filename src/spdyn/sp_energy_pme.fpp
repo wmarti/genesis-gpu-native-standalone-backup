@@ -44,6 +44,7 @@ module sp_energy_pme_mod
   ! subroutines
   public  :: setup_pme
   public  :: dealloc_pme
+  public  :: pme_ngrid_used
   public  :: pme_pre
   public  :: pme_pre_lj
   public  :: pme_recip
@@ -134,6 +135,44 @@ contains
     return
 
   end subroutine setup_pme
+
+  !======1=========2=========3=========4=========5=========6=========7=========8
+  !
+  !  Function      pme_ngrid_used
+  !> @brief        the mesh the active scheme runs on, which setup may have
+  !!               changed from the input pme_ngrid_x/y/z
+  !
+  !======1=========2=========3=========4=========5=========6=========7=========8
+
+  function pme_ngrid_used() result(g)
+
+    use sp_energy_pme_opt_1dalltoall_mod,   only: g_o1 => ngrid
+    use sp_energy_pme_noopt_1dalltoall_mod, only: g_n1 => ngrid
+    use sp_energy_pme_opt_2dalltoall_mod,   only: g_o2 => ngrid
+    use sp_energy_pme_noopt_2dalltoall_mod, only: g_n2 => ngrid
+    use sp_energy_pme_opt_slab_mod,         only: g_os => ngrid
+    use sp_energy_pme_noopt_slab_mod,       only: g_ns => ngrid
+
+    integer :: g(3)
+
+    select case (pme_scheme)
+    case (FFT_opt_1dalltoall)
+      g(1:3) = g_o1(1:3)
+    case (FFT_noopt_1dalltoall)
+      g(1:3) = g_n1(1:3)
+    case (FFT_opt_2dalltoall)
+      g(1:3) = g_o2(1:3)
+    case (FFT_noopt_2dalltoall)
+      g(1:3) = g_n2(1:3)
+    case (FFT_opt_slab)
+      g(1:3) = g_os(1:3)
+    case (FFT_noopt_slab)
+      g(1:3) = g_ns(1:3)
+    case default
+      g(1:3) = 0
+    end select
+
+  end function pme_ngrid_used
 
   !======1=========2=========3=========4=========5=========6=========7=========8
   !

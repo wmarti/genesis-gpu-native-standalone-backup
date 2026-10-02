@@ -85,8 +85,18 @@ module timers_mod
   integer, public, parameter :: TimerCGIDRKH    = 47
   integer, public, parameter :: TimerCGKH       = 48
 
+  ! The device-native core's five mutually exclusive step classes
+  ! (doc/21_GPU_Native.rst).  They are ordinary host wall clocks in the
+  ! product binary, measured unconditionally: there is no environment
+  ! warm-up switch and no CUDA event among them.
+  integer, public, parameter :: TimerNativeSetup   = 49
+  integer, public, parameter :: TimerNativeStep    = 50
+  integer, public, parameter :: TimerNativeRebuild = 51
+  integer, public, parameter :: TimerNativeEnergy  = 52
+  integer, public, parameter :: TimerNativeOutput  = 53
+
   integer,         parameter :: InvalidID       = -1
-  integer,         parameter :: NumTimers       = 48  !< total number of timers
+  integer,         parameter :: NumTimers       = 53  !< total number of timers
   integer,         parameter :: MaxProc         = 100 !< maximum number of processes
 
   ! variables
@@ -246,6 +256,11 @@ contains
       avetime(TimerComm2)      = sumtime(TimerComm2)      / nproc_world
       avetime(TimerComm3)      = sumtime(TimerComm3)      / nproc_world
       avetime(TimerIntegrator) = sumtime(TimerIntegrator) / nproc_world
+      avetime(TimerNativeSetup)   = sumtime(TimerNativeSetup)   / nproc_world
+      avetime(TimerNativeStep)    = sumtime(TimerNativeStep)    / nproc_world
+      avetime(TimerNativeRebuild) = sumtime(TimerNativeRebuild) / nproc_world
+      avetime(TimerNativeEnergy)  = sumtime(TimerNativeEnergy)  / nproc_world
+      avetime(TimerNativeOutput)  = sumtime(TimerNativeOutput)  / nproc_world
       avetime(TimerSolvation)  = sumtime(TimerSolvation)  / nproc_world
       avetime(TimerGB)         = sumtime(TimerGB)         / nproc_world
       avetime(TimerSA)         = sumtime(TimerSA)         / nproc_world
@@ -406,6 +421,36 @@ contains
                                 avetime(TimerComm3),                           &
                                 ' (',mintime(TimerComm3),',',                  &
                                  maxtime(TimerComm3),')'
+      ! The device-native core's step classes.  They are printed
+      ! unconditionally and are zero for a run that did not engage it,
+      ! which is what makes a fallback run distinguishable from a native
+      ! one in the ordinary timing block rather than only in the log.
+      write(MsgOut,'(a)')       '  gpu native       '
+      write(MsgOut,'(a,f12.3,a,f12.3,a,f12.3,a)')                              &
+                                '    setup         =',                         &
+                                avetime(TimerNativeSetup),                     &
+                                ' (',mintime(TimerNativeSetup),',',            &
+                                 maxtime(TimerNativeSetup),')'
+      write(MsgOut,'(a,f12.3,a,f12.3,a,f12.3,a)')                              &
+                                '    ordinary step =',                         &
+                                avetime(TimerNativeStep),                      &
+                                ' (',mintime(TimerNativeStep),',',             &
+                                 maxtime(TimerNativeStep),')'
+      write(MsgOut,'(a,f12.3,a,f12.3,a,f12.3,a)')                              &
+                                '    rebuild step  =',                         &
+                                avetime(TimerNativeRebuild),                   &
+                                ' (',mintime(TimerNativeRebuild),',',          &
+                                 maxtime(TimerNativeRebuild),')'
+      write(MsgOut,'(a,f12.3,a,f12.3,a,f12.3,a)')                              &
+                                '    energy step   =',                         &
+                                avetime(TimerNativeEnergy),                    &
+                                ' (',mintime(TimerNativeEnergy),',',           &
+                                 maxtime(TimerNativeEnergy),')'
+      write(MsgOut,'(a,f12.3,a,f12.3,a,f12.3,a)')                              &
+                                '    output step   =',                         &
+                                avetime(TimerNativeOutput),                    &
+                                ' (',mintime(TimerNativeOutput),',',           &
+                                 maxtime(TimerNativeOutput),')'
       write(MsgOut,'(a)') ''
 
     end if

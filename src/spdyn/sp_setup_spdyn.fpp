@@ -74,6 +74,10 @@ module sp_setup_spdyn_mod
   use messages_mod
   use timers_mod
   use mpi_parallel_mod
+#ifdef USE_GPU
+  use sp_gpu_core_abi_mod, only: gcx_place_device
+  use, intrinsic :: iso_c_binding, only: c_int, c_int32_t, c_double
+#endif
   use constants_mod
   use sp_fep_topology_mod
   use sp_alchemy_mod
@@ -155,6 +159,7 @@ contains
     type(s_mode)             :: mode
     type(s_localres)         :: localres
     logical                  :: use_parallel_io
+    real(kind(1.0d0))        :: link_gbs, dev_units
 
     ! setup parallel I/O
     !
@@ -214,6 +219,37 @@ contains
                         ctrl_data%ene_info%dsize_cg,     &
                         ctrl_data%ene_info%dmin_size_cg, &
                         rst, boundary)
+
+    ! pme_grid = ACCURACY: mesh and alpha from the accuracy of the input
+    !
+    ! the device-native core runs VVER and VRES (sp_enefunc_str.fpp)
+#ifdef USE_GPU
+    pme_native_requested = ctrl_data%dyn_info%gpu_resident .and.           &
+                           (ctrl_data%dyn_info%integrator == IntegratorVVER .or. &
+                            ctrl_data%dyn_info%integrator == IntegratorVRES)
+#endif
+    link_gbs  = 0.0d0
+    dev_units = 0.0d0
+#ifdef USE_GPU
+    ! the native core picks its rank -> GPU order from measured links, before
+    ! anything is allocated on the device (stock runs keep assign_gpu's); the
+    ! slowest neighbour link (or the inter-node rate, when slower) and the
+    ! device throughput inform pme_grid
+    if (ctrl_data%dyn_info%gpu_resident .and.                           &
+        nproc_world == nproc_country)                      &
+      call gcx_place_device(int(mpi_comm_country, c_int),               &
+                            int(boundary%num_domain, c_int32_t),       &
+                            real([boundary%box_size_x, boundary%box_size_y, &
+                                  boundary%box_size_z], c_double),     &
+                            link_gbs, dev_units)
+#endif
+    call select_pme_grid([real(boundary%box_size_x,wp),                     &
+                          real(boundary%box_size_y,wp),                     &
+                          real(boundary%box_size_z,wp)],                    &
+                         [boundary%num_cells_x, boundary%num_cells_y,       &
+                          boundary%num_cells_z], pme_native_requested,      &
+                         boundary%num_domain, real(link_gbs, wp),           &
+                         real(dev_units, wp), ctrl_data%ene_info)
   
     ! set parameters for domain 
     !
@@ -520,6 +556,14 @@ contains
                         ctrl_data%ene_info%dmin_size_cg, &
                         rst, boundary)
 
+    call select_pme_grid([real(boundary%box_size_x,wp),                     &
+                          real(boundary%box_size_y,wp),                     &
+                          real(boundary%box_size_z,wp)],                    &
+                         [boundary%num_cells_x, boundary%num_cells_y,       &
+                          boundary%num_cells_z], pme_native_requested,      &
+                         boundary%num_domain, 0.0_wp, 0.0_wp,               &
+                         ctrl_data%ene_info)
+
 
     ! set parameters for domain
     !
@@ -760,6 +804,20 @@ contains
                         ctrl_data%ene_info%dsize_cg,     &
                         ctrl_data%ene_info%dmin_size_cg, &
                         rst, boundary)
+
+    ! the device-native core runs VVER and VRES (sp_enefunc_str.fpp)
+#ifdef USE_GPU
+    pme_native_requested = ctrl_data%dyn_info%gpu_resident .and.           &
+                           (ctrl_data%dyn_info%integrator == IntegratorVVER .or. &
+                            ctrl_data%dyn_info%integrator == IntegratorVRES)
+#endif
+    call select_pme_grid([real(boundary%box_size_x,wp),                     &
+                          real(boundary%box_size_y,wp),                     &
+                          real(boundary%box_size_z,wp)],                    &
+                         [boundary%num_cells_x, boundary%num_cells_y,       &
+                          boundary%num_cells_z], pme_native_requested,      &
+                         boundary%num_domain, 0.0_wp, 0.0_wp,               &
+                         ctrl_data%ene_info)
 
     ! set parameters for restraints
     !
@@ -1037,6 +1095,14 @@ contains
                         ctrl_data%ene_info%dmin_size_cg, &
                         rst, boundary)
 
+    call select_pme_grid([real(boundary%box_size_x,wp),                     &
+                          real(boundary%box_size_y,wp),                     &
+                          real(boundary%box_size_z,wp)],                    &
+                         [boundary%num_cells_x, boundary%num_cells_y,       &
+                          boundary%num_cells_z], pme_native_requested,      &
+                         boundary%num_domain, 0.0_wp, 0.0_wp,               &
+                         ctrl_data%ene_info)
+
     ! set parameters for domain 
     !
     call setup_domain(ctrl_data%ene_info,  &
@@ -1201,6 +1267,14 @@ contains
     ! set parameters for boundary condition
     !
     call setup_boundary_pio(ctrl_data%bound_info, boundary)
+
+    call select_pme_grid([real(boundary%box_size_x,wp),                     &
+                          real(boundary%box_size_y,wp),                     &
+                          real(boundary%box_size_z,wp)],                    &
+                         [boundary%num_cells_x, boundary%num_cells_y,       &
+                          boundary%num_cells_z], pme_native_requested,      &
+                         boundary%num_domain, 0.0_wp, 0.0_wp,               &
+                         ctrl_data%ene_info)
 
     ! read domain restart file (Parallel I/O)
     !
@@ -1376,6 +1450,14 @@ contains
     ! set parameters for boundary condition
     !
     call setup_boundary_pio(ctrl_data%bound_info, boundary)
+
+    call select_pme_grid([real(boundary%box_size_x,wp),                     &
+                          real(boundary%box_size_y,wp),                     &
+                          real(boundary%box_size_z,wp)],                    &
+                         [boundary%num_cells_x, boundary%num_cells_y,       &
+                          boundary%num_cells_z], pme_native_requested,      &
+                         boundary%num_domain, 0.0_wp, 0.0_wp,               &
+                         ctrl_data%ene_info)
 
     ! read domain restart file (Parallel I/O)
     !
@@ -1557,6 +1639,14 @@ contains
     ! set parameters for boundary condition
     !
     call setup_boundary_pio(ctrl_data%bound_info, boundary)
+
+    call select_pme_grid([real(boundary%box_size_x,wp),                     &
+                          real(boundary%box_size_y,wp),                     &
+                          real(boundary%box_size_z,wp)],                    &
+                         [boundary%num_cells_x, boundary%num_cells_y,       &
+                          boundary%num_cells_z], pme_native_requested,      &
+                         boundary%num_domain, 0.0_wp, 0.0_wp,               &
+                         ctrl_data%ene_info)
 
  
     ! read domain restart file (Parallel I/O)

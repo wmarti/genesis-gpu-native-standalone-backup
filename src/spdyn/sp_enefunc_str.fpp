@@ -468,6 +468,8 @@ module sp_enefunc_str_mod
     integer                       :: excl_level
 
     integer                       :: dispersion_corr
+    integer                       :: nonbond_precision
+    integer                       :: ewald_evaluation
     real(wp)                      :: eswitch
     real(wp)                      :: vswitch
     real(wp)                      :: dispersion_energy
@@ -664,6 +666,22 @@ module sp_enefunc_str_mod
                                                               'ENERGY', &
                                                               'EPRESS'/)
 
+  ! parameters (arithmetic of the real-space pair term, [ENERGY]
+  ! nonbond_precision; MIXED is evaluated by the device-native core only)
+  integer,      public, parameter :: NonbondPrecisionDouble = 1
+  integer,      public, parameter :: NonbondPrecisionMixed  = 2
+  character(*), public, parameter :: NonbondPrecisionTypes(2) = (/'DOUBLE', &
+                                                                  'MIXED '/)
+
+  ! parameters (the MIXED pair term, [ENERGY] ewald_evaluation: GENESIS's
+  ! table, or Ewald real space and the switched LJ in closed form; not
+  ! given = Auto: analytic where the table is that form)
+  integer,      public, parameter :: EwaldEvaluationTable    = 1
+  integer,      public, parameter :: EwaldEvaluationAnalytic = 2
+  integer,      public, parameter :: EwaldEvaluationAuto     = 0
+  character(*), public, parameter :: EwaldEvaluationTypes(2) = (/'TABLE   ', &
+                                                                 'ANALYTIC'/)
+
   ! parameters (FEP calculation)
   integer,      public, parameter :: FEP_PRESERVE         = 0
   integer,      public, parameter :: FEP_APPEAR           = 1
@@ -693,6 +711,16 @@ module sp_enefunc_str_mod
 
 
   ! subroutines
+  ! The stock PME schemes need pme_nspline mesh points per cell (each rank
+  ! spreads from its neighbour cells only).  The device-native core has no
+  ! such limit: it spreads every owned and ghost atom into its own brick of
+  ! the mesh.  pme_native_requested is set by the MD setup when gpu_resident
+  ! runs a native integrator; a scheme that would refuse the mesh then
+  ! records pme_mesh_native_only instead, and a native decline stops the run
+  ! (sp_gpu_core_step.fpp gpu_core_decline).
+  logical, public, save :: pme_native_requested = .false.
+  logical, public, save :: pme_mesh_native_only = .false.
+
   public  :: init_enefunc
   public  :: alloc_enefunc
   public  :: dealloc_enefunc

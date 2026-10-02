@@ -62,6 +62,12 @@ module sp_dynamics_mod
     integer          :: rstout_period    =      0
     integer          :: stoptr_period    =     10
     integer          :: nbupdate_period  =     10
+    logical          :: gpu_resident     =  .false.
+    logical          :: gpu_step_graph = .false.
+    logical          :: gpu_list_guard   = .false.
+    integer          :: gpu_route_mesh   = GpuRouteMPI
+    integer          :: gpu_route_coord  = GpuRouteMPI
+    integer          :: gpu_route_force  = GpuRouteMPI
     integer          :: elec_long_period =      1
     integer          :: iseed            =     -1
     real(wp)         :: initial_time     =    0.0_wp
@@ -138,6 +144,13 @@ contains
         write(MsgOut,'(A)') '# rstout_period = 0         # restart output period'
         write(MsgOut,'(A)') '# stoptr_period = 10         # remove translational and rotational motions period'
         write(MsgOut,'(A)') '# nbupdate_period = 10      # nonbond update period'
+        write(MsgOut,'(A)') '# gpu_resident  = NO        # device-native core'
+        write(MsgOut,'(A)') '# gpu_step_graph = NO      # native core: plain steps as CUDA graphs (np > 1)'
+        write(MsgOut,'(A)') '# gpu_list_guard = NO       # native core: rebuild the pair list early when an atom may'
+        write(MsgOut,'(A)') '#                           # cross the list buffer (nbupdate_period = maximum age)'
+        write(MsgOut,'(A)') '# gpu_route_mesh  = MPI     # native core: inter-node transport of the PME mesh,'
+        write(MsgOut,'(A)') '# gpu_route_coord = MPI     # the coordinate halo and the force halo'
+        write(MsgOut,'(A)') '# gpu_route_force = MPI     # [MPI,THREAD]'
         write(MsgOut,'(A)') '# iseed         = -1        # random number seed '
         write(MsgOut,'(A)') '# initial_time  = 0.0       # initial time (ps)'
         write(MsgOut,'(A)') '# annealing     = NO        # simulated annealing'
@@ -223,6 +236,18 @@ contains
                                dyn_info%stoptr_period)
     call read_ctrlfile_integer(handle, Section, 'nbupdate_period', &
                                dyn_info%nbupdate_period)
+    call read_ctrlfile_logical(handle, Section, 'gpu_resident',    &
+                               dyn_info%gpu_resident)
+    call read_ctrlfile_logical(handle, Section, 'gpu_step_graph', &
+                               dyn_info%gpu_step_graph)
+    call read_ctrlfile_logical(handle, Section, 'gpu_list_guard', &
+                               dyn_info%gpu_list_guard)
+    call read_ctrlfile_type   (handle, Section, 'gpu_route_mesh',  &
+                               dyn_info%gpu_route_mesh, GpuRouteTypes)
+    call read_ctrlfile_type   (handle, Section, 'gpu_route_coord', &
+                               dyn_info%gpu_route_coord, GpuRouteTypes)
+    call read_ctrlfile_type   (handle, Section, 'gpu_route_force', &
+                               dyn_info%gpu_route_force, GpuRouteTypes)
     call read_ctrlfile_integer(handle, Section, 'elec_long_period',&
                                dyn_info%elec_long_period)
     call read_ctrlfile_integer(handle, Section, 'iseed',         &
@@ -289,6 +314,24 @@ contains
             '  stoptr_period   = ', dyn_info%stoptr_period
       write(MsgOut,'(A20,I10)')                                  &
             '  iseed           = ', dyn_info%iseed
+      if (dyn_info%gpu_resident) then
+        write(MsgOut,'(A)') '  gpu_resident    =        yes'
+      else
+        write(MsgOut,'(A)') '  gpu_resident    =         no'
+      end if
+      if (dyn_info%gpu_step_graph) &
+        write(MsgOut,'(A)') '  gpu_step_graph  =        yes'
+      if (dyn_info%gpu_list_guard) &
+        write(MsgOut,'(A)') '  gpu_list_guard       =   yes'
+      if (dyn_info%gpu_route_mesh /= GpuRouteMPI) &
+        write(MsgOut,'(A,A)') '  gpu_route_mesh       =   ', &
+                              trim(GpuRouteTypes(dyn_info%gpu_route_mesh))
+      if (dyn_info%gpu_route_coord /= GpuRouteMPI) &
+        write(MsgOut,'(A,A)') '  gpu_route_coord      =   ', &
+                              trim(GpuRouteTypes(dyn_info%gpu_route_coord))
+      if (dyn_info%gpu_route_force /= GpuRouteMPI) &
+        write(MsgOut,'(A,A)') '  gpu_route_force      =   ', &
+                              trim(GpuRouteTypes(dyn_info%gpu_route_force))
       if (dyn_info%hydrogen_mr) then
         write(MsgOut,'(A)') '  hydrogen_mr     =        yes'
         write(MsgOut,'(A20,A10)')                                &
@@ -385,6 +428,27 @@ contains
         'LEAP integrator is not available. '//&
         'Please run VVER integrator instead.')
     end if
+
+    ! The device-native core is dispatched from the VVER and VRES loops
+    ! (sp_md_vverlet.fpp, sp_md_respa.fpp); any other integrator runs
+    ! stock's loop. VVER and VRES get their verdict when the core is set up.
+    !
+#ifdef USE_GPU
+    if (dyn_info%gpu_resident .and. dyn_info%integrator /= IntegratorVVER &
+        .and. dyn_info%integrator /= IntegratorVRES) then
+      if (main_rank) write(MsgOut,'(A)')                                &
+        'Setup_GPU_Core> requested=YES effective=cpu reason=integrator '//&
+        trim(IntegratorTypes(dyn_info%integrator)) //                   &
+        ' is not native (only VVER and VRES)'
+    else if (.not. dyn_info%gpu_resident .and. main_rank) then
+      write(MsgOut,'(A)') &
+        'Setup_GPU_Core> requested=NO effective=cpu reason=gpu_resident = NO'
+    end if
+#else
+    if (dyn_info%gpu_resident .and. main_rank) write(MsgOut,'(A)')      &
+      'Setup_GPU_Core> requested=YES effective=cpu reason=GENESIS '//   &
+      'was built without --enable-gpu'
+#endif
       
     ! error check
     !
@@ -521,6 +585,12 @@ contains
     dynamics%rstout_period     = dyn_info%rstout_period
     dynamics%stoptr_period     = dyn_info%stoptr_period
     dynamics%nbupdate_period   = dyn_info%nbupdate_period
+    dynamics%gpu_resident      = dyn_info%gpu_resident
+    dynamics%gpu_step_graph    = dyn_info%gpu_step_graph
+    dynamics%gpu_list_guard    = dyn_info%gpu_list_guard
+    dynamics%gpu_route_mesh    = dyn_info%gpu_route_mesh
+    dynamics%gpu_route_coord   = dyn_info%gpu_route_coord
+    dynamics%gpu_route_force   = dyn_info%gpu_route_force
     dynamics%elec_long_period  = dyn_info%elec_long_period
     dynamics%initial_time      = dyn_info%initial_time
     dynamics%xi_respa          = dyn_info%xi_respa
@@ -668,6 +738,12 @@ contains
     dynamics%rstout_period     = dyn_info%rstout_period
     dynamics%stoptr_period     = dyn_info%stoptr_period
     dynamics%nbupdate_period   = dyn_info%nbupdate_period
+    dynamics%gpu_resident      = dyn_info%gpu_resident
+    dynamics%gpu_step_graph    = dyn_info%gpu_step_graph
+    dynamics%gpu_list_guard    = dyn_info%gpu_list_guard
+    dynamics%gpu_route_mesh    = dyn_info%gpu_route_mesh
+    dynamics%gpu_route_coord   = dyn_info%gpu_route_coord
+    dynamics%gpu_route_force   = dyn_info%gpu_route_force
     dynamics%elec_long_period  = dyn_info%elec_long_period
     dynamics%initial_time      = dyn_info%initial_time
     dynamics%xi_respa          = dyn_info%xi_respa

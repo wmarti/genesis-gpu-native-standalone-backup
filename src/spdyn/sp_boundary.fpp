@@ -21,6 +21,7 @@ module sp_boundary_mod
   use messages_mod
   use mpi_parallel_mod
   use constants_mod
+  use string_mod
 
   implicit none
   private
@@ -55,6 +56,7 @@ module sp_boundary_mod
     integer             :: duplicate_y   = 1
     integer             :: duplicate_z   = 1
     logical             :: shift_origin  = .true.
+    logical             :: domain_halo   = .false.
   end type s_boundary_info
 
   ! subroutines
@@ -100,6 +102,11 @@ contains
         write(MsgOut,'(A)') 'domain_x      = 0         # domain size (x)'
         write(MsgOut,'(A)') 'domain_y      = 0         # domain size (y)'
         write(MsgOut,'(A)') 'domain_z      = 0         # domain size (z)'
+#ifdef USE_GPU
+        write(MsgOut,'(A)') '# domain_select = HALO    # [STOCK,HALO] domains when all 0'
+#else
+        write(MsgOut,'(A)') '# domain_select = STOCK   # [STOCK,HALO] domains when all 0'
+#endif
         write(MsgOut,'(A)') 'duplicate_x   = 1         # domain size (x)'
         write(MsgOut,'(A)') 'duplicate_y   = 1         # domain size (x)'
         write(MsgOut,'(A)') 'duplicate_z   = 1         # domain size (x)'
@@ -144,6 +151,15 @@ contains
     integer,                 intent(in)    :: handle
     type(s_boundary_info),   intent(inout) :: bound_info
 
+    ! local variables
+    character(MaxLine)                     :: domain_select
+
+
+#ifdef USE_GPU
+    domain_select = 'halo'
+#else
+    domain_select = 'stock'
+#endif
 
     ! read parameters from control file
     ! 
@@ -187,6 +203,9 @@ contains
     call read_ctrlfile_integer(handle, Section, 'pio_domain_z', &
                                bound_info%pio_domain_z)
 
+    call read_ctrlfile_string (handle, Section, 'domain_select', &
+                               domain_select)
+
     call read_ctrlfile_integer(handle, Section, 'duplicate_x',  &
                                bound_info%duplicate_x)
     call read_ctrlfile_integer(handle, Section, 'duplicate_y',  &
@@ -195,6 +214,13 @@ contains
                                bound_info%duplicate_z)
 
     call end_ctrlfile_section(handle)
+
+    call tolower(domain_select)
+    if (trim(domain_select) == 'halo') then
+      bound_info%domain_halo = .true.
+    else if (trim(domain_select) /= 'stock') then
+      call error_msg('Read_Ctrl_Boundary> domain_select must be STOCK or HALO')
+    end if
 
     ! write parameters to MsgOut
     !
@@ -292,23 +318,29 @@ contains
 
     call init_boundary(boundary)
 
-    if (bound_info%domain_x == 1 .or. bound_info%domain_y == 1 .or. &
-        bound_info%domain_z == 1) then
+    ! An axis that is not decomposed (one domain) is periodic within the
+    ! rank. The communication setup (setup_communicate) walks x first, then
+    ! y over x's boundary cells, then z over x's and y's, so the decomposed
+    ! axes must be a leading run: (a,1,1), (a,b,1) or (a,b,c) with a,b,c >= 2,
+    ! or the single domain (1,1,1). An undecomposed x ahead of a decomposed
+    ! axis, or an undecomposed y ahead of a decomposed z, is not supported.
+    ! All-zero (automatic) is left to setup_processor_number.
+    !
+    if (bound_info%domain_x /= 0 .and. bound_info%domain_y /= 0 .and.   &
+        bound_info%domain_z /= 0 .and.                                    &
+        .not.((bound_info%domain_x == 1 .and. &
+               bound_info%domain_y == 1 .and. &
+               bound_info%domain_z == 1) .or. &
+              (bound_info%domain_x >= 2 .and. &
+               bound_info%domain_y >= 1 .and. &
+               bound_info%domain_z == 1 ) .or. &
+              (bound_info%domain_x >= 2 .and. &
+               bound_info%domain_y >= 2 .and. &
+               bound_info%domain_z >= 2))) then
 
-      if (.not.((bound_info%domain_x == 2 .and. &
-                 bound_info%domain_y == 1 .and. &
-                 bound_info%domain_z == 1) .or. &
-                (bound_info%domain_x == 2 .and. &
-                 bound_info%domain_y == 2 .and. &
-                 bound_info%domain_z == 1) .or. &
-                (bound_info%domain_x == 1 .and. &
-                 bound_info%domain_y == 1 .and. &
-                 bound_info%domain_z == 1))) then
-
-        call error_msg('Setup_Boundary> other than (2,1,1)/(2,2,1)/(1,1,1), '//&
-                       'domain[x,y,z] should be larger than 1')
-
-      end if
+      call error_msg('Setup_Boundary> domain[x,y,z] must be (1,1,1), '//     &
+                     '(a,1,1), (a,b,1) or (a,b,c) with a,b,c >= 2: '//       &
+                     'an axis with one domain may not precede a split axis')
 
     end if
 
@@ -531,6 +563,12 @@ contains
     bsize_y = boundary%box_size_y
     bsize_z = boundary%box_size_z
 
+    if (bound_info%domain_halo) then
+      call select_domain_halo(bsize_x, bsize_y, bsize_z, &
+                              pairlistdist+2.0_wp+buffer, boundary)
+      return
+    end if
+
     nx  = int (bsize_x / (pairlistdist+2.0_wp+buffer))
     ny  = int (bsize_y / (pairlistdist+2.0_wp+buffer))
     nz  = int (bsize_z / (pairlistdist+2.0_wp+buffer))
@@ -635,6 +673,89 @@ contains
     return
 
   end subroutine setup_processor_number
+
+  !======1=========2=========3=========4=========5=========6=========7=========8
+  !
+  !  Subroutine    select_domain_halo
+  !> @brief        domain_select = HALO: of the domain grids nx*ny*nz equal to
+  !!               the process count whose domains are at least one minimum
+  !!               width wide on every axis (the stock rule), the one whose
+  !!               domains import the smallest weighted halo volume
+  !!               prod(L_k + 2 w_k) - prod(L_k), with L_k the domain length and
+  !!               w_k the minimum width on a divided axis and 0.43 of it on an
+  !!               undivided one (weight set from measured step times). Ties go
+  !!               to fewer divided axes, then more domains along x, then along
+  !!               y. Only grids that
+  !!               divide x before y and y before z are considered.
+  !! @authors      GENESIS native-port contributors
+  !! @param[in]    bsize_x/y/z : box lengths
+  !! @param[in]    wmin        : minimum domain width (pairlistdist + 2 A +
+  !!                             cell_size_buffer, as in the stock rule)
+  !! @param[inout] boundary    : num_domain and num_domain_max are set
+  !
+  !======1=========2=========3=========4=========5=========6=========7=========8
+
+  subroutine select_domain_halo(bsize_x, bsize_y, bsize_z, wmin, boundary)
+
+    ! formal arguments
+    real(wp),                intent(in)    :: bsize_x, bsize_y, bsize_z
+    real(wp),                intent(in)    :: wmin
+    type(s_boundary),        intent(inout) :: boundary
+
+    ! halo weight of an undivided axis, relative to a divided one
+    real(wp),                parameter     :: UndividedWeight = 0.43_wp
+
+    ! local variables
+    real(wp)                 :: box(3), l(3), e(3), cost, best
+    integer                  :: n(3), nmax(3), nbest(3), i, j, k, nsplit
+    integer                  :: best_split
+
+
+    box  = [bsize_x, bsize_y, bsize_z]
+    nmax = int(box / wmin)
+    best = huge(1.0_wp)
+    best_split = 4
+    nbest = 0
+
+    do i = nproc_city, 1, -1
+      if (mod(nproc_city, i) /= 0 .or. i > nmax(1)) cycle
+      do j = nproc_city / i, 1, -1
+        if (mod(nproc_city / i, j) /= 0 .or. j > nmax(2)) cycle
+        k = nproc_city / (i * j)
+        if (k > nmax(3)) cycle
+        ! divide y only with x divided, and z only with y divided
+        if ((j > 1 .and. i == 1) .or. (k > 1 .and. j == 1)) cycle
+        n = [i, j, k]
+        l = box / real(n, wp)
+        e = l + 2.0_wp * UndividedWeight * wmin
+        where (n > 1) e = l + 2.0_wp * wmin
+        cost   = e(1) * e(2) * e(3) - l(1) * l(2) * l(3)
+        nsplit = count(n > 1)
+        if (cost < best * (1.0_wp - 1.0e-6_wp) .or. &
+            (cost <= best * (1.0_wp + 1.0e-6_wp) .and. nsplit < best_split)) then
+          best       = cost
+          best_split = nsplit
+          nbest      = n
+        end if
+      end do
+    end do
+
+    if (nbest(1) == 0) &
+      call error_msg('Select_Domain_Halo> Cannot define domains: '// &
+                     'smaller MPI processors, or shorter pairlistdist, '// &
+                     'or larger boxsize should be used.')
+
+    boundary%num_domain(1:3)     = nbest(1:3)
+    boundary%num_domain_max(1:3) = nbest(1:3)
+
+    if (main_rank) &
+      write(MsgOut,'(A,3I5,A,F12.1,A)') &
+        'Select_Domain_Halo> domains', nbest, '  halo volume', best, &
+        ' A^3 per domain'
+
+    return
+
+  end subroutine select_domain_halo
 
   !======1=========2=========3=========4=========5=========6=========7=========8
   !

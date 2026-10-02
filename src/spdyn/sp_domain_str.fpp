@@ -88,6 +88,11 @@ module sp_domain_str_mod
     !  DomainCellPair
     integer(int2),    allocatable :: cell_pair(:,:)
     integer(int1),    allocatable :: virial_check(:,:)
+    !> the seam tie key assign_cell_atoms builds,
+    !! num_atom(cell)*nproc_city + <owning rank>, retained rather than
+    !! discarded with setup_domain_interaction's local; the cell-pair
+    !! rule's tie-break reads setup-time occupancy (doc/21_GPU_Native.rst).
+    real(wp),         allocatable :: cell_tie_key(:)
 #ifndef PGICUDA
     integer(1),       allocatable :: cell_move(:,:,:)
 #else

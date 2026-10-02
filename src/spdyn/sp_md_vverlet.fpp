@@ -41,6 +41,9 @@ module sp_md_vverlet_mod
   use constants_mod
   use sp_alchemy_str_mod
   use sp_fep_energy_mod
+#ifdef USE_GPU
+  use sp_gpu_core_step_mod
+#endif
 #ifdef HAVE_MPI_GENESIS
   use mpi
 #endif
@@ -116,6 +119,9 @@ contains
     integer                  :: iseed, id, omp_get_thread_num
     integer                  :: istart, iend
     logical                  :: npt, npt1
+#ifdef USE_GPU
+    logical                  :: gpu_native_ran, gpu_native_tail
+#endif
 
     integer,         pointer :: atmcls_pbc(:)
     real(wip),       pointer :: coord(:,:,:), coord_ref(:,:,:)
@@ -231,6 +237,33 @@ contains
       end if
 
     end if
+
+#ifdef USE_GPU
+    ! The native-loop dispatch (doc/21_GPU_Native.rst). `gpu_resident = NO` and
+    ! any unqualified feature leave this branch untaken and the stock loop
+    ! below runs unchanged.
+    !
+    if (dynamics%gpu_resident) then
+      call gpu_core_vverlet(output, domain, enefunc, dynvars, dynamics,  &
+                            pairlist, boundary, constraints, ensemble,   &
+                            remd, gpu_native_ran, gpu_native_tail)
+      ! A temperature-REMD context stays resident on the device: it has
+      ! already performed this tail (extra VV1, reference restore, energy
+      ! output) where the state is.
+      if (gpu_native_ran .and. gpu_native_tail) return
+      if (gpu_native_ran) then
+        ! The native loop wrote the final trajectory/restart and restored
+        ! the complete post-VV2 host state.  Finish in stock's own phase.
+        call integrate_vv1(dynamics, iend+1, ensemble, domain, constraints, &
+                           boundary, dynvars)
+        call coord_vel_ref(domain, dynvars)
+        call compute_dynvars(enefunc, dynamics, boundary, ensemble, domain, &
+                             dynvars)
+        call output_dynvars(output, enefunc, dynvars, ensemble)
+        return
+      end if
+    end if
+#endif
 
     ! Main loop
     !
@@ -2044,10 +2077,9 @@ contains
       end if
       kin(1:3) = kin_full(1:3) + kin_half(1:3)
       ekin = ekin_full + ekin_half
-#ifdef HAVE_MPI_GENESIS
-      call mpi_allreduce(mpi_in_place, virial_sum, 3, mpi_real8, mpi_sum, &
-                         mpi_comm_country, ierror)
-#endif
+      ! reduce_virial_sum is this same allreduce unless a native force path
+      ! armed exact bonded words for it (sp_dynvars reduce_extra)
+      call reduce_virial_sum(virial_sum)
       press(1:3) = (kin(1:3) + virial_sum(1:3))/volume
       pressxyz = (press(1)+press(2)+press(3))/3.0_dp
       pressxy  = (press(1)+press(2))/2.0_dp
@@ -2535,10 +2567,9 @@ contains
           virial_sum(1) = virial(1,1) + virial_constraint(1,1)
           virial_sum(2) = virial(2,2) + virial_constraint(2,2)
           virial_sum(3) = virial(3,3) + virial_constraint(3,3)
-#ifdef HAVE_MPI_GENESIS 
-          call mpi_allreduce(mpi_in_place, virial_sum, 3, mpi_real8, mpi_sum, &
-                             mpi_comm_country, ierror)
-#endif
+          ! reduce_virial_sum is this same allreduce unless a native force path
+          ! armed exact bonded words for it (sp_dynvars reduce_extra)
+          call reduce_virial_sum(virial_sum)
           if (iter == 1) kin_half(1:3) = kin_ref(1:3)
           kin(1:3) = 0.5_dp * (kin_half(1:3)+kin_ref(1:3))
 
@@ -2956,10 +2987,9 @@ contains
         virial_sum(2) = virial(2,2)
         virial_sum(3) = virial(3,3)
       end if
-#ifdef HAVE_MPI_GENESIS
-      call mpi_allreduce(mpi_in_place, virial_sum, 3, mpi_real8, mpi_sum, &
-                         mpi_comm_country, ierror)
-#endif
+      ! reduce_virial_sum is this same allreduce unless a native force path
+      ! armed exact bonded words for it (sp_dynvars reduce_extra)
+      call reduce_virial_sum(virial_sum)
       press(1:3) = (kin(1:3) + virial_sum(1:3))/volume
       pressxyz = (press(1)+press(2)+press(3))/3.0_dp
       pressxy  = (press(1)+press(2))/2.0_dp

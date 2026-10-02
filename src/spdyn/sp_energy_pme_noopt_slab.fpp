@@ -45,7 +45,7 @@ module sp_energy_pme_noopt_slab_mod
   real(wp),         save :: gx1
   integer,          save :: n_bs         ! Order of B-spline
   integer,          save :: grid_bd      ! boundary grid number
-  integer,          save :: ngrid(4)     ! Number of grid
+  integer, public,  save :: ngrid(4)     ! Number of grid
   integer,          save :: nx           ! process number in x dimension
   integer,          save :: ny           ! process number in y dimension
   integer,          save :: nz           ! process number in z dimension
@@ -187,9 +187,12 @@ contains
       ngridMax   = min(ngridMax,int(boundary%cell_size_y/grid_space))
       grid_space = boundary%box_size_z / real(ngrid(3),wp)
       ngridMax   = min(ngridMax,int(boundary%cell_size_z/grid_space))
-      if (ngridmax < n_bs) &
-        call error_msg('Cell size should be larger to obtain the charge'// &
-                       ' data from neighboring cells')
+      if (ngridmax < n_bs) then
+        if (.not. pme_native_requested) &
+          call error_msg('Cell size should be larger to obtain the charge'// &
+                         ' data from neighboring cells')
+        pme_mesh_native_only = .true.
+      end if
 
       ! Check grid point in x direction
       !

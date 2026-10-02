@@ -21,19 +21,21 @@ else
   PRST_SETUP=
 endif
 
-# Units of the GPU native core, compiled into a convenience archive until
-# the dispatch to the native core links them into spdyn.
+# The device-native core itself (doc/21_GPU_Native.rst).  spdyn links it so
+# that the one dispatch in sp_md_vverlet.fpp has something to dispatch to;
+# a build without --enable-gpu compiles none of it.
 if CUDAGPU
+# The native host units include gpu_core_native.h, which includes the CUDA
+# runtime and cuFFT headers; give the host C++ compiler the same include
+# directory nvcc uses (configure.ac: CUDA_INCLUDE).
 AM_CPPFLAGS = $(CUDA_INCLUDE)
-noinst_LIBRARIES = libgpucore.a
-libgpucore_a_AR = $(AR) $(ARFLAGS) cr
 NATIVE_CORE_INCS = \
+	gpu_fixed_sum.cuh \
 	gpu_core_abi.h \
 	gpu_core_internal.h \
 	gpu_core_native.h \
 	gpu_core_xchg.h \
 	gpu_domain.h \
-	gpu_fixed_sum.cuh \
 	gpu_nbcluster.h \
 	gpu_nbcluster_fit.h \
 	gpu_layout_schedule.hpp \
@@ -42,22 +44,26 @@ NATIVE_CORE_INCS = \
 	gpu_pencil_fft.hpp \
 	gpu_pme_recip.hpp \
 	gpu_pme_recip_numerics.hpp
-libgpucore_a_SOURCES = $(NATIVE_CORE_INCS) \
+NATIVE_CORE_SOURCES = \
+	$(NATIVE_CORE_INCS) \
 	gpu_core.cpp \
 	gpu_core_device.cu \
-	gpu_nbcluster.cu \
+	gpu_domain.cu \
 	gpu_force.cu \
-	gpu_step.cu \
+	gpu_migration.cu \
+	gpu_nbcluster.cu \
 	gpu_npt.cu \
+	gpu_pme.cu \
+	gpu_rebuild.cu \
 	gpu_remd.cu \
+	gpu_step.cu \
+	gpu_xchg.cu \
 	gpu_mesh_exchange_session.cu \
 	gpu_pencil_fft.cu \
 	gpu_pme_recip.cu \
-	gpu_pme.cu \
-	gpu_xchg.cu \
-	gpu_domain.cu \
-	gpu_rebuild.cu \
-	gpu_migration.cu
+	sp_gpu_core_abi.fpp \
+	sp_gpu_core.fpp \
+	sp_gpu_core_step.fpp
 endif
 
 bin_PROGRAMS = spdyn $(PRST_SETUP)
@@ -156,6 +162,7 @@ if CUDAGPU
 spdyn_SOURCES += \
 	gpu_sp_energy.cu \
 	gpu_common.h \
+	$(NATIVE_CORE_SOURCES) \
 	spdyn.fpp
 else
 spdyn_SOURCES += \
@@ -385,19 +392,34 @@ if CUDAGPU
 # every native object depends on every native header
 gpu_core.o \
 gpu_core_device.o \
-gpu_nbcluster.o \
+gpu_domain.o \
 gpu_force.o \
-gpu_step.o \
+gpu_migration.o \
+gpu_nbcluster.o \
 gpu_npt.o \
+gpu_pme.o \
+gpu_rebuild.o \
 gpu_remd.o \
+gpu_step.o \
+gpu_xchg.o \
 gpu_mesh_exchange_session.o \
 gpu_pencil_fft.o \
-gpu_pme_recip.o \
-gpu_pme.o \
-gpu_xchg.o \
-gpu_domain.o \
-gpu_rebuild.o \
-gpu_migration.o : $(NATIVE_CORE_INCS)
+gpu_pme_recip.o : $(NATIVE_CORE_INCS)
+sp_remd.o                  : sp_gpu_core_step.o
+sp_gpu_core_step.o  : sp_gpu_core.o sp_gpu_core_abi.o \
+                             sp_output.o sp_dynvars.o sp_domain_str.o \
+                             sp_enefunc_str.o sp_energy_str.o sp_pairlist_str.o \
+                             sp_constraints_str.o sp_boundary_str.o \
+                             sp_ensemble_str.o sp_dynvars_str.o \
+                             sp_dynamics_str.o sp_output_str.o sp_remd_str.o \
+                             sp_restraints_str.o
+sp_md_vverlet.o            : sp_gpu_core_step.o
+sp_md_respa.o              : sp_gpu_core_step.o
+sp_setup_spdyn.o           : sp_gpu_core_abi.o
+spdyn.o                    : sp_gpu_core_abi.o
+sp_gpu_core.o       : sp_gpu_core_abi.o sp_domain_str.o \
+                             sp_enefunc_str.o sp_constraints_str.o \
+                             sp_boundary_str.o sp_energy_pme.o sp_energy_str.o
 endif
 
 prst_setup$(EXEEXT) : $(spdyn_ADDLIB) $(prst_setup_OBJECTS)

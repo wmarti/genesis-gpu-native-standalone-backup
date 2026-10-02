@@ -29,6 +29,8 @@ module sp_dynvars_mod
 #ifdef HAVE_MPI_GENESIS
   use mpi
 #endif
+  use, intrinsic :: iso_c_binding, only: c_funptr, c_null_funptr, &
+                                         c_f_procpointer, c_int, c_double
   
   implicit none
   private
@@ -37,6 +39,24 @@ module sp_dynvars_mod
   integer, public, save :: DynvarsOut = 6
 
   logical,         save :: etitle = .true.
+
+  ! Extra words a force path may send through reduce_property's allreduce:
+  ! when reduce_extra_n > 0 they ride after its 20 values and, after the
+  ! reduction, the procedure reduce_extra_fold points to (interface: see
+  ! reduce_property) folds them into those values, in its before_reduce
+  ! layout.  Armed per force evaluation, used by one reduction.  Unarmed,
+  ! reduce_property is unchanged.
+  integer, parameter            :: ReduceExtraMax = 64
+  integer,  public,        save :: reduce_extra_n = 0
+  real(dp), public,        save :: reduce_extra(ReduceExtraMax)
+  type(c_funptr), public,  save :: reduce_extra_fold = c_null_funptr
+  ! The barostats' virial diagonal reduction (reduce_virial_sum) carries the
+  ! same armed words and reduce_extra_vfold folds them into the diagonal;
+  ! it does not disarm them.
+  type(c_funptr), public,  save :: reduce_extra_vfold = c_null_funptr
+  ! reduce_property_armed's buffers (module storage, not its stack frame)
+  real(dp),                save :: reduce_extra_before(20+ReduceExtraMax)
+  real(dp),                save :: reduce_extra_after(20+ReduceExtraMax)
 
   ! subroutines
   public  :: setup_dynvars
@@ -48,6 +68,8 @@ module sp_dynvars_mod
   private :: output_dynvars_gromacs
   private :: compute_pressure
   private :: reduce_property
+  private :: reduce_property_armed
+  public  :: reduce_virial_sum
 
 contains
 
@@ -157,7 +179,7 @@ contains
   !======1=========2=========3=========4=========5=========6=========7=========8
 
   subroutine compute_dynvars(enefunc, dynamics, boundary, ensemble, domain, &
-                             dynvars)
+                             dynvars, native_rmsg, native_ekin_sum)
 
     ! formal arguments
     type(s_enefunc),         intent(in)    :: enefunc
@@ -166,6 +188,7 @@ contains
     type(s_ensemble),        intent(in)    :: ensemble
     type(s_domain),  target, intent(inout) :: domain
     type(s_dynvars), target, intent(inout) :: dynvars
+    real(dp), optional,       intent(in)    :: native_rmsg, native_ekin_sum
 
     ! local variables
     real(dp)                 :: rmsg, viri_ke, viri_ke_ext
@@ -209,34 +232,46 @@ contains
       num_degree = domain%num_deg_freedom
     end if
 
-    ! rmsg
-    !
-    rmsg = 0.0_dp
-    do i = 1, ncell
-      do ix = 1, natom(i)
-        ! FEP: skip singleB to avoid duplication
-        if (domain%fep_use) then
-          if (domain%fepgrp(ix,i) == 2) cycle
-        end if
-        rmsg = rmsg + force(1,ix,i)*force(1,ix,i) &
-                    + force(2,ix,i)*force(2,ix,i) &
-                    + force(3,ix,i)*force(3,ix,i)
+    ! Native callers provide the two local sums from the same device phase.
+    ! The stock path retains its exact per-atom loop and FEP exclusion.
+    if (present(native_rmsg) .and. present(native_ekin_sum)) then
+      if (domain%fep_use) &
+        call error_msg('Compute_Dynvars> native sums do not admit FEP')
+      rmsg = native_rmsg
+      ekin_sum = native_ekin_sum
+    else if (present(native_rmsg) .or. present(native_ekin_sum)) then
+      call error_msg('Compute_Dynvars> both native sums are required')
+      return
+    else
+      ! rmsg
+      !
+      rmsg = 0.0_dp
+      do i = 1, ncell
+        do ix = 1, natom(i)
+          ! FEP: skip singleB to avoid duplication
+          if (domain%fep_use) then
+            if (domain%fepgrp(ix,i) == 2) cycle
+          end if
+          rmsg = rmsg + force(1,ix,i)*force(1,ix,i) &
+                      + force(2,ix,i)*force(2,ix,i) &
+                      + force(3,ix,i)*force(3,ix,i)
+        end do
       end do
-    end do
 
-    ekin_sum = 0.0_dp
-    do i = 1, ncell
-      do ix = 1, natom(i)
-        ! FEP: skip singleB to avoid duplication
-        if (domain%fep_use) then
-          if (domain%fepgrp(ix,i) == 2) cycle
-        end if
-        ekin_sum = ekin_sum + mass(ix,i)*(vel_ref(1,ix,i)*vel_ref(1,ix,i) &
-                                         +vel_ref(2,ix,i)*vel_ref(2,ix,i) &
-                                         +vel_ref(3,ix,i)*vel_ref(3,ix,i))
+      ekin_sum = 0.0_dp
+      do i = 1, ncell
+        do ix = 1, natom(i)
+          ! FEP: skip singleB to avoid duplication
+          if (domain%fep_use) then
+            if (domain%fepgrp(ix,i) == 2) cycle
+          end if
+          ekin_sum = ekin_sum + mass(ix,i)*(vel_ref(1,ix,i)*vel_ref(1,ix,i) &
+                                           +vel_ref(2,ix,i)*vel_ref(2,ix,i) &
+                                           +vel_ref(3,ix,i)*vel_ref(3,ix,i))
+        end do
       end do
-    end do
-    ekin_sum = ekin_sum * 0.5_dp
+      ekin_sum = ekin_sum * 0.5_dp
+    end if
  
     ! virial
     !
@@ -1012,8 +1047,14 @@ contains
     before_reduce(20)    = val16
 
 #ifdef HAVE_MPI_GENESIS
+    if (reduce_extra_n > 0) then
+      ! the armed extra words ride in this same allreduce (see
+      ! reduce_extra above); the unarmed branch below is the stock one
+      call reduce_property_armed(before_reduce, after_reduce)
+    else
     call mpi_allreduce(before_reduce, after_reduce, 20, mpi_real8, &
                       mpi_sum, mpi_comm_country, ierror)
+    end if
 #else
     after_reduce(1:20) = before_reduce(1:20)
 #endif
@@ -1038,5 +1079,105 @@ contains
     return
 
   end subroutine reduce_property
+
+  !======1=========2=========3=========4=========5=========6=========7=========8
+  !
+  !  Subroutine    reduce_property_armed
+  !> @brief        reduce_property's allreduce with the armed extra words
+  !! @param[in]    before_reduce : this rank's 20 values
+  !! @param[out]   after_reduce  : the global 20 values, extra words folded in
+  !
+  !  A separate routine with its buffers in module storage, so that
+  !  reduce_property keeps a small stack frame and the compiler may inline
+  !  it into compute_dynvars as it did before the armed path existed.
+  !
+  !======1=========2=========3=========4=========5=========6=========7=========8
+
+  subroutine reduce_property_armed(before_reduce, after_reduce)
+
+    ! formal arguments
+    real(dp),               intent(in)    :: before_reduce(20)
+    real(dp),               intent(out)   :: after_reduce(20)
+
+#ifdef HAVE_MPI_GENESIS
+    ! local variables
+    integer                 :: n
+    interface
+      subroutine reduce_extra_fold_if(nextra, extra, reduced) bind(c)
+        import :: c_int, c_double
+        integer(c_int), value :: nextra
+        real(c_double)        :: extra(*), reduced(20)
+      end subroutine reduce_extra_fold_if
+    end interface
+    procedure(reduce_extra_fold_if), pointer :: fold
+
+
+    n = 20 + reduce_extra_n
+    reduce_extra_before(1:20) = before_reduce(1:20)
+    reduce_extra_before(21:n) = reduce_extra(1:reduce_extra_n)
+    call mpi_allreduce(reduce_extra_before, reduce_extra_after, n, mpi_real8, &
+                       mpi_sum, mpi_comm_country, ierror)
+    after_reduce(1:20) = reduce_extra_after(1:20)
+    call c_f_procpointer(reduce_extra_fold, fold)
+    call fold(int(reduce_extra_n, c_int), reduce_extra_after(21:n), after_reduce)
+    reduce_extra_n = 0
+#else
+    after_reduce(1:20) = before_reduce(1:20)
+#endif
+
+    return
+
+  end subroutine reduce_property_armed
+
+  !======1=========2=========3=========4=========5=========6=========7=========8
+  !
+  !  Subroutine    reduce_virial_sum
+  !> @brief        sum a barostat's virial diagonal over the ranks
+  !! @param[inout] virial_sum : this rank's diagonal in, the global one out
+  !
+  !  Unarmed, the allreduce the barostats have always made.  Armed (see
+  !  reduce_extra), the extra words ride in it and reduce_extra_vfold folds
+  !  them into the diagonal.
+  !
+  !======1=========2=========3=========4=========5=========6=========7=========8
+
+  subroutine reduce_virial_sum(virial_sum)
+
+    ! formal arguments
+    real(dp),               intent(inout) :: virial_sum(3)
+
+#ifdef HAVE_MPI_GENESIS
+    ! local variables
+    real(dp)                :: buf(3+ReduceExtraMax)
+    integer                 :: n
+
+    interface
+      subroutine reduce_extra_vfold_if(nextra, extra, diag) bind(c)
+        import :: c_int, c_double
+        integer(c_int), value :: nextra
+        real(c_double)        :: extra(*), diag(3)
+      end subroutine reduce_extra_vfold_if
+    end interface
+    procedure(reduce_extra_vfold_if), pointer :: vfold
+
+
+    if (reduce_extra_n > 0) then
+      n = 3 + reduce_extra_n
+      buf(1:3) = virial_sum(1:3)
+      buf(4:n) = reduce_extra(1:reduce_extra_n)
+      call mpi_allreduce(mpi_in_place, buf, n, mpi_real8, mpi_sum, &
+                         mpi_comm_country, ierror)
+      call c_f_procpointer(reduce_extra_vfold, vfold)
+      call vfold(int(reduce_extra_n, c_int), buf(4:n), buf(1:3))
+      virial_sum(1:3) = buf(1:3)
+    else
+      call mpi_allreduce(mpi_in_place, virial_sum, 3, mpi_real8, mpi_sum, &
+                         mpi_comm_country, ierror)
+    end if
+#endif
+
+    return
+
+  end subroutine reduce_virial_sum
 
 end module sp_dynvars_mod

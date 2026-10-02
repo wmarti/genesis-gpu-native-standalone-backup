@@ -40,6 +40,9 @@ module sp_md_respa_mod
   use constants_mod
   use sp_alchemy_str_mod
   use sp_fep_energy_mod
+#ifdef USE_GPU
+  use sp_gpu_core_step_mod
+#endif
 #ifdef HAVE_MPI_GENESIS
   use mpi
 #endif
@@ -132,6 +135,9 @@ contains
     real(wip),       pointer :: force_short(:,:,:), force_long(:,:,:)
     integer,         pointer :: ncell, natom(:)
     logical,         pointer :: XI_RESPA, XO_RESPA
+#ifdef USE_GPU
+    logical                  :: gpu_native_ran, gpu_native_tail
+#endif
 
 
     atmcls_pbc    => domain%atmcls_pbc
@@ -236,6 +242,19 @@ contains
       end if
     
     end if
+
+#ifdef USE_GPU
+    ! The native loop (sp_gpu_core_step.fpp) runs this integrator's
+    ! outer and inner steps and its tail on the device; when it declines,
+    ! the stock loop below runs unchanged.
+    !
+    if (dynamics%gpu_resident) then
+      call gpu_core_vverlet(output, domain, enefunc, dynvars, dynamics,  &
+                            pairlist, boundary, constraints, ensemble,   &
+                            remd, gpu_native_ran, gpu_native_tail)
+      if (gpu_native_ran) return
+    end if
+#endif
 
     call mpi_barrier(mpi_comm_country, ierror)
     Timt=0.0d0

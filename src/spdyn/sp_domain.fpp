@@ -518,6 +518,8 @@ contains
     nboundary    = domain%num_cell_boundary
 
     allocate(natom(1:ncel_local+nboundary))
+    if (allocated(domain%cell_tie_key)) deallocate(domain%cell_tie_key)
+    allocate(domain%cell_tie_key(1:ncel_local+nboundary))
 
     ! check neighboring cells of each local cell
     !
@@ -646,6 +648,10 @@ contains
       univ_maxcell = ij
       univ_ncell_near = ncel_local + maxcell_near
     end if
+
+    ! Retain the seam tie key: a pure function of the setup-time occupancy
+    ! and the owning rank.
+    domain%cell_tie_key(1:ncel_local+nboundary) = natom(1:ncel_local+nboundary)
 
     deallocate(natom)
 

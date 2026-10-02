@@ -82,11 +82,19 @@ program spdyn
   type(s_remd)                :: remd
   type(s_rpath)               :: rpath
   integer                     :: omp_get_max_threads, i
+  integer                     :: mpi_thread_level
   real(dp)                    :: sas, eae
   type(s_alchemy)             :: alchemy
 
 #ifdef HAVE_MPI_GENESIS
+#ifdef USE_GPU
+  ! The native core's THREAD route (gpu_route_*) runs MPI from a transport
+  ! thread; it checks the level it was given and keeps the MPI routes below
+  ! MPI_THREAD_MULTIPLE.
+  call mpi_init_thread(MPI_THREAD_MULTIPLE, mpi_thread_level, ierror)
+#else
   call mpi_init(ierror)
+#endif
   call mpi_comm_rank(mpi_comm_world, my_world_rank, ierror)
   call mpi_comm_size(mpi_comm_world, nproc_world,   ierror)
   main_rank = (my_world_rank == 0)
@@ -205,6 +213,9 @@ contains
       write(MsgOut,'(A)') ' '
 
       call hw_information
+#ifdef USE_GPU
+      call nonbond_precision_information(ctrl_filename)
+#endif
 
 #ifdef USE_GPU
     else
@@ -457,5 +468,44 @@ contains
     return
 
   end subroutine domain_decomposition_genesis
+
+#ifdef USE_GPU
+  !======1=========2=========3=========4=========5=========6=========7=========8
+  !
+  !  Subroutine    nonbond_precision_information
+  !> @brief        state a MIXED real-space pair term with the precision
+  !! @param[in]    ctrl_filename : control file name
+  !
+  !  [ENERGY] nonbond_precision = MIXED makes the device-native core
+  !  evaluate the real-space pair term in FP32 (sp_energy.fpp), so the
+  !  build's precision line alone would misstate the run.
+  !
+  !======1=========2=========3=========4=========5=========6=========7=========8
+
+  subroutine nonbond_precision_information(ctrl_filename)
+
+    character(*),            intent(in)    :: ctrl_filename
+
+    character(MaxLine)       :: value
+    integer                  :: handle
+
+
+    call open_ctrlfile(ctrl_filename, handle)
+    if (handle == 0) return
+    value = 'DOUBLE'
+    call read_ctrlfile_string(handle, 'Energy', 'nonbond_precision', value)
+    call close_ctrlfile(handle)
+    call toupper(value)
+    if (adjustl(value) == 'MIXED') then
+      write(MsgOut,'(A)') '  precision    = mixed (nonbond_precision = MIXED: '// &
+                          'FP32 real-space pair, bonded, 1-4 and '// &
+                          'excluded-pair terms and PME mesh)'
+      write(MsgOut,'(A)')
+    end if
+
+    return
+
+  end subroutine nonbond_precision_information
+#endif
 
 end program spdyn

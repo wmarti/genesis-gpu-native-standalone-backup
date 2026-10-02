@@ -75,6 +75,7 @@ module sp_energy_mod
     integer               :: pme_ngrid_z      = FakeDefault
     integer               :: pme_nspline      = 4
     real(wp)              :: pme_max_spacing  = 1.2_wp
+    logical               :: pme_grid_accuracy = .false.
     integer               :: pme_scheme       = FFT_AutoSelect
     integer               :: nonbond_kernel   = NBK_AutoSelect
     logical               :: table            = .true.
@@ -83,6 +84,8 @@ module sp_energy_mod
     character(5)          :: water_model      = 'NONE'
     integer               :: output_style     = OutputStyleGENESIS
     integer               :: dispersion_corr  = Disp_corr_NONE
+    integer               :: nonbond_precision = NonbondPrecisionDouble
+    integer               :: ewald_evaluation  = EwaldEvaluationAuto
     real(wp)              :: minimum_contact  = 0.5_wp
     real(wp)              :: err_minimum_contact = 0.3_wp
     logical               :: use_knl_generic  = .false.
@@ -102,6 +105,7 @@ module sp_energy_mod
   ! subroutines
   public  :: show_ctrl_energy
   public  :: read_ctrl_energy
+  public  :: select_pme_grid
   public  :: compute_energy
   public  :: compute_energy_short
   public  :: compute_energy_long
@@ -170,6 +174,8 @@ contains
         write(MsgOut,'(A)') '# table_density = 20.0      # number of bins used for lookup table'
         write(MsgOut,'(A)') '# output_style  = GENESIS   # format of energy output [GENESIS,CHARMM,NAMD,GROMACS]'
         write(MsgOut,'(A)') '# dispersion_corr = NONE    # dispersion correction [NONE,Energy,EPress]'
+        write(MsgOut,'(A)') '# nonbond_precision = DOUBLE # real-space pair and water constraint arithmetic [DOUBLE,MIXED]'
+        write(MsgOut,'(A)') '# ewald_evaluation = ANALYTIC # MIXED pair term [TABLE,ANALYTIC]'
         if (run_mode == 'min') then
         write(MsgOut,'(A)') '# contact_check   = YES     # check atomic clash'
         write(MsgOut,'(A)') '# nonb_limiter    = YES     # avoid failure due to atomic clash'
@@ -230,6 +236,9 @@ contains
     type(s_ene_info),        intent(inout) :: ene_info
 
     character(MaxLine)                     :: pme_alpha = "auto"
+    character(MaxLine)                     :: pme_grid  = "input"
+    character(MaxLine)                     :: native_integrator
+    logical                                :: native_cutoff, native_mixed
     real(wp)                               :: cutoff, cutoff2, mind
     real(wp)                               :: cutoff2_water
     integer                                :: cutoff_int2
@@ -275,6 +284,8 @@ contains
                                ene_info%pme_nspline)
     call read_ctrlfile_real   (handle, Section, 'pme_max_spacing', &
                                ene_info%pme_max_spacing)
+    call read_ctrlfile_string (handle, Section, 'pme_grid',      &
+                               pme_grid)
     call read_ctrlfile_type   (handle, Section, 'PME_scheme',    &
                                ene_info%pme_scheme, FFT_Types)
     call read_ctrlfile_real   (handle, Section, 'table_density', &
@@ -285,6 +296,10 @@ contains
                                ene_info%output_style, OutputStyleTypes)
     call read_ctrlfile_type   (handle, Section, 'dispersion_corr',  &
                                ene_info%dispersion_corr, Disp_corr_Types)
+    call read_ctrlfile_type   (handle, Section, 'nonbond_precision', &
+                               ene_info%nonbond_precision, NonbondPrecisionTypes)
+    call read_ctrlfile_type   (handle, Section, 'ewald_evaluation', &
+                               ene_info%ewald_evaluation, EwaldEvaluationTypes)
     call read_ctrlfile_type   (handle, Section, 'structure_check',  &
                                ene_info%structure_check, StructureCheckTypes)
     call read_ctrlfile_logical(handle, Section, 'contact_check',  &
@@ -373,12 +388,44 @@ contains
     end if
 
 #ifdef USE_GPU
-    if (ene_info%electrostatic == ElectrostaticCUTOFF) &
-      call error_msg( &
-         'Read_Ctrl_Energy> cutoff is not available with GPU. '// &
-         'Please use GENESIS compiled without enabling GPU.')
+    ! Stock's GPU path has no cutoff electrostatics. The device-native core
+    ! evaluates GENESIS's own cutoff arithmetic, so a cutoff run is admitted
+    ! only with the native core and a native integrator; if the core then
+    ! declines, the run stops rather than falling back.
+    if (ene_info%electrostatic == ElectrostaticCUTOFF) then
+      native_cutoff = .false.
+      native_integrator = 'VVER'
+      call read_ctrlfile_logical(handle, 'Dynamics', 'gpu_resident', &
+                                 native_cutoff)
+      call read_ctrlfile_string (handle, 'Dynamics', 'integrator',   &
+                                 native_integrator)
+      native_integrator = adjustl(native_integrator)
+      call toupper(native_integrator)
+      if (.not. native_cutoff .or. native_integrator(1:4) /= 'VVER' .or. &
+          len_trim(native_integrator) /= 4) &
+        call error_msg( &
+           'Read_Ctrl_Energy> cutoff is not available with GPU. '// &
+           'Please use GENESIS compiled without enabling GPU, or '// &
+           'the device-native core (integrator = VVER, gpu_resident = YES).')
+      if (main_rank) write(MsgOut,'(A)') &
+        'Read_Ctrl_Energy> cutoff electrostatics: device-native core only'
+    end if
 
     if (ene_info%water_model /= "NONE") ene_info%water_model = 'NONE'
+
+    ! MIXED is a mode of the device-native core's PME real-space kernel
+    ! (gpu_force.cu); nothing else evaluates it, so a run that asks
+    ! for it without that kernel stops here rather than running in FP64.
+    if (ene_info%nonbond_precision == NonbondPrecisionMixed) then
+      native_mixed = .false.
+      call read_ctrlfile_logical(handle, 'Dynamics', 'gpu_resident', &
+                                 native_mixed)
+      if (.not. native_mixed .or. &
+          ene_info%electrostatic /= ElectrostaticPME) &
+        call error_msg( &
+           'Read_Ctrl_Energy> nonbond_precision = MIXED needs the '// &
+           'device-native core (gpu_resident = YES) and electrostatic = PME.')
+    end if
 
     if (ene_info%nonb_limiter) &
       call error_msg( &
@@ -390,6 +437,24 @@ contains
          'Read_Ctrl_Energy> structure_check is not available with GPU. '// &
          'Please use GENESIS compiled without enabling GPU.')
 #endif
+#ifndef USE_GPU
+    if (ene_info%nonbond_precision == NonbondPrecisionMixed) &
+      call error_msg( &
+         'Read_Ctrl_Energy> nonbond_precision = MIXED needs the '// &
+         'device-native core (GENESIS compiled with GPU).')
+#endif
+    if (ene_info%ewald_evaluation == EwaldEvaluationAnalytic .and. &
+        ene_info%nonbond_precision /= NonbondPrecisionMixed) &
+      call error_msg( &
+         'Read_Ctrl_Energy> ewald_evaluation = ANALYTIC is a mode of '// &
+         'nonbond_precision = MIXED.')
+
+    call tolower(pme_grid)
+    if (trim(pme_grid) == "accuracy") then
+      ene_info%pme_grid_accuracy = .true.
+    else if (trim(pme_grid) /= "input") then
+      call error_msg('Read_Ctrl_Energy> pme_grid must be INPUT or ACCURACY')
+    end if
 
     call tolower(pme_alpha)
     if (trim(pme_alpha) .eq. "auto") then
@@ -652,6 +717,13 @@ contains
       else if (ene_info%dispersion_corr == Disp_corr_EPress) then
         write(MsgOut,'(A)') '  dispersion_corr =          epress'
       end if
+
+      if (ene_info%nonbond_precision == NonbondPrecisionMixed) &
+        write(MsgOut,'(A)') '  nonbond_precision =         mixed'
+      if (ene_info%ewald_evaluation == EwaldEvaluationAnalytic) &
+        write(MsgOut,'(A)') '  ewald_evaluation =       analytic'
+      if (ene_info%ewald_evaluation == EwaldEvaluationTable) &
+        write(MsgOut,'(A)') '  ewald_evaluation =          table'
 
       if (ene_info%nonb_limiter) then
         write(MsgOut,'(A)') '  nonb_limiter    =             yes'
@@ -6921,5 +6993,268 @@ contains
     return
 
   end subroutine compute_energy_amber_short_fep
+
+  !======1=========2=========3=========4=========5=========6=========7=========8
+  !
+  !  Subroutine    select_pme_grid
+  !> @brief        pme_grid = ACCURACY: the order (4 or 6), mesh and alpha
+  !!               whose estimated RMS electrostatic force error is no larger
+  !!               than that of the input setting (pme_alpha or pme_alpha_tol,
+  !!               and pme_ngrid or pme_max_spacing, at the same cutoff and
+  !!               order), with the smallest modelled time per step
+  !! @authors      GENESIS native-port contributors
+  !! @param[in]    box      : box lengths
+  !! @param[in]    ncell    : cells per axis (the stock schemes need
+  !!                          pme_nspline mesh points per cell)
+  !! @param[in]    native   : the device-native core runs the sum, which
+  !!                          has no points-per-cell rule
+  !! @param[in]    nd       : domains per axis
+  !! @param[in]    link_gbs : slowest measured copy rate between neighbouring
+  !!                          domains' GPUs, or to the next node when the
+  !!                          job spans nodes, GB/s (0: not measured)
+  !! @param[in]    units    : device throughput, SMs x clock in GHz (0: unknown)
+  !! @param[inout] ene_info : pme_alpha, pme_nspline and pme_ngrid_x/y/z are
+  !!                          replaced
+  !! @note         Error: real space Kolafa and Perram, Mol. Simul. 9, 351
+  !!               (1992); reciprocal space Deserno and Holm, JCP 109, 7678
+  !!               (1998), times 1.5. Only the mesh, order and alpha change;
+  !!               the cutoff is kept. A mesh is a candidate only if every
+  !!               stock scheme keeps it for this domain grid, so the choice
+  !!               is the same on every rank. Time: a step's forces end when
+  !!               the later of two concurrent chains ends: the pair chain
+  !!               (pair kernels plus spread and gather) and the mesh chain
+  !!               (transforms plus the mesh bytes a rank moves per step at
+  !!               the measured link rate, derated for staged transposes
+  !!               sharing the links with the halo). Compute is per rank,
+  !!               scaled by the device throughput.
+  !
+  !======1=========2=========3=========4=========5=========6=========7=========8
+
+  subroutine select_pme_grid(box, ncell, native, nd, link_gbs, units, ene_info)
+
+    ! formal arguments
+    real(wp),                intent(in)    :: box(3)
+    integer,                 intent(in)    :: ncell(3)
+    logical,                 intent(in)    :: native
+    integer,                 intent(in)    :: nd(3)
+    real(wp),                intent(in)    :: link_gbs
+    real(wp),                intent(in)    :: units
+    type(s_ene_info),        intent(inout) :: ene_info
+
+    ! Modelled time per step in us: per atom (WAtom, pair kernels, spread and
+    ! gather) and per mesh point (WMesh, transforms); atoms are estimated at
+    ! the density of water, 0.1 per cubic Angstrom.
+    real(wp), parameter      :: WAtom = 6.6e-5_wp, WMesh = 2.0e-4_wp
+    ! pair kernels, us per atom at a 12 A cutoff
+    real(wp), parameter      :: WPair = 9.4e-3_wp
+    real(wp), parameter      :: RefUnits = 151.0_wp, KSerial = 5.0_wp
+
+    ! the stock schemes' transform lengths per rank (sp_energy_pme_*.fpp)
+    integer,  parameter      :: NumIndex = 45
+    integer,  parameter      :: Index(NumIndex) = (/ &
+                                1,   2,   3,   4,   5,   6,   8,   9,  10,  12, &
+                               15,  16,  18,  20,  24,  25,  27,  30,  32,  36, &
+                               40,  45,  48,  50,  54,  60,  64,  72,  75,  80, &
+                               81,  90,  96, 100, 120, 125, 128, 135, 144, 150, &
+                              160, 162, 180, 192, 200/)
+
+    ! local variables
+    real(wp)                 :: target, err, best, a, a_best, h, cost, natom
+    real(wp)                 :: word, speed, bytes, npts, np, tpair, tmesh
+    integer                  :: n(3), nref(3), nbest(3), nx, k, i, p, p_best
+    integer                  :: nsplit
+
+    if (.not. ene_info%pme_grid_accuracy) return
+    if (ene_info%electrostatic /= ElectrostaticPME) return
+    if (ene_info%pme_nspline /= 4 .and. ene_info%pme_nspline /= 6) &
+      call error_msg('Select_Pme_Grid> pme_grid = ACCURACY needs '// &
+                     'pme_nspline 4 or 6')
+
+    if (ene_info%pme_ngrid_x /= FakeDefault .and. &
+        ene_info%pme_ngrid_y /= FakeDefault .and. &
+        ene_info%pme_ngrid_z /= FakeDefault) then
+      nref = [ene_info%pme_ngrid_x, ene_info%pme_ngrid_y, ene_info%pme_ngrid_z]
+    else
+      nref = int(box / ene_info%pme_max_spacing)
+    end if
+    target = pme_force_error(ene_info%pme_alpha, nref, ene_info%pme_nspline)
+    natom  = 0.1_wp * box(1) * box(2) * box(3)
+    np     = real(nd(1) * nd(2) * nd(3), wp)
+    nsplit = count(nd > 1)
+    word   = 8.0_wp
+    if (ene_info%nonbond_precision /= NonbondPrecisionMixed) word = 16.0_wp
+    speed  = 1.0_wp
+    if (units > 0.0_wp) speed = RefUnits / units
+
+    ! orders 4 and 6; x spacings down to 1/1.25 of the reference's (each
+    ! axis rounded up to a kept mesh); alpha from 0.8 to 1.5 times the input
+    best   = huge(1.0_wp)
+    nbest  = nref
+    p_best = ene_info%pme_nspline
+    a_best = ene_info%pme_alpha
+    do p = 4, 6, 2
+      do nx = 2 * p, (5 * nref(1)) / 4
+        ! the spacing of nx points along x; each axis takes the smallest
+        ! mesh at least that fine which every stock scheme keeps
+        h = box(1) / real(nx, wp)
+        do k = 1, 3
+          n(k) = max(2, ceiling(box(k) / h - 1.0e-6_wp))
+          do while (.not. (fft_friendly(n(k)) .and. stock_keeps(n(k), k)) &
+                    .and. n(k) <= 2 * nref(k))
+            n(k) = n(k) + 1
+          end do
+        end do
+        if (any(n > 2 * nref)) cycle
+        if (.not. native .and. any(n < p * ncell)) cycle
+        npts = real(n(1), wp) * n(2) * n(3)
+        tpair = speed * natom / np * (WPair * (ene_info%cutoffdist / 12.0_wp)**3 &
+              + WAtom * p**2)
+        tmesh = speed * WMesh * npts / np
+        if (native .and. nsplit >= 1 .and. link_gbs > 0.0_wp) then
+          ! 2 transposes per decomposed axis, each moving half of this rank's
+          ! complex mesh; the brick moves (order - 1) planes per split face
+          bytes = 2.0_wp * nsplit * 0.5_wp * (n(1) / 2 + 1) * n(2) * n(3) &
+                * word / np
+          do k = 1, 3
+            if (nd(k) > 1) bytes = bytes + 2.0_wp * (p - 1) * npts / n(k) &
+                                 / (np / nd(k)) * 0.5_wp * word
+          end do
+          tmesh = tmesh + KSerial * bytes / (link_gbs * 1.0e3_wp)
+        end if
+        ! the later chain, plus a little of the other (overlap is not free)
+        cost = max(tpair, tmesh) + 0.05_wp * min(tpair, tmesh)
+        if (cost >= best) cycle
+        ! this mesh's best alpha, kept if it meets the target
+        err = huge(1.0_wp)
+        do i = 0, 700
+          a = ene_info%pme_alpha * (0.8_wp + 0.001_wp * i)
+          if (pme_force_error(a, n, p) < err) then
+            err = pme_force_error(a, n, p)
+            h   = a
+          end if
+        end do
+        if (err <= target) then
+          best   = cost
+          nbest  = n
+          p_best = p
+          a_best = h
+        end if
+      end do
+    end do
+
+    if (main_rank) then
+      write(MsgOut,'(A,3I5,A,I2,A,F10.6,A,3I5,A,I2,A,F10.6,A,ES10.3,A,ES10.3)') &
+        'Select_Pme_Grid> input mesh', nref, ' order', ene_info%pme_nspline,  &
+        ' alpha', ene_info%pme_alpha, ' -> mesh', nbest, ' order', p_best,    &
+        ' alpha', a_best, '  relative error estimate', target, ' ->',         &
+        pme_force_error(a_best, nbest, p_best)
+      write(MsgOut,'(A,3I4,A,F8.2,A,F8.1,A,F10.1,A)')                         &
+        'Select_Pme_Grid> domains', nd, '  link', link_gbs,                    &
+        ' GB/s  device units', units, '  modelled', best, ' us/step'
+    end if
+
+    ene_info%pme_alpha   = a_best
+    ene_info%pme_nspline = p_best
+    ene_info%pme_ngrid_x = nbest(1)
+    ene_info%pme_ngrid_y = nbest(2)
+    ene_info%pme_ngrid_z = nbest(3)
+    return
+
+  contains
+
+    ! m is kept by every stock scheme's rounding along axis k: a multiple of
+    ! each scheme's factor for this domain grid, with a quotient from Index
+    ! (or a power of two above it)
+    logical function stock_keeps(m, k)
+      integer, intent(in) :: m, k
+      integer :: f(4), j, q, nf
+      f = 0
+      select case (k)
+      case (1)
+        f(1:3) = [2 * nd(1), 2 * nd(1) * nd(2), 2 * nd(1) * nd(2) * nd(3)]
+        nf = 3
+      case (2)
+        f(1:3) = [merge(nd(2) * nd(3), 2 * nd(2) * nd(3), mod(nd(3), 2) == 0), &
+                  nd(1) * nd(2) * nd(3), nd(2) * nd(3)]
+        nf = 3
+      case default
+        f(1:3) = [nd(3) * nd(1), lcm_of(nd(3) * nd(1), nd(3) * nd(2)),         &
+                  nd(1) * nd(2) * nd(3)]
+        nf = 3
+      end select
+      stock_keeps = .false.
+      do j = 1, nf
+        if (mod(m, f(j)) /= 0) return
+        q = m / f(j)
+        if (q <= Index(NumIndex)) then
+          if (.not. any(Index == q)) return
+        else
+          if (iand(q, q - 1) /= 0) return
+        end if
+      end do
+      stock_keeps = .true.
+    end function stock_keeps
+
+    integer function lcm_of(i1, i2)
+      integer, intent(in) :: i1, i2
+      integer :: x, y, t
+      x = i1
+      y = i2
+      do while (y /= 0)
+        t = mod(x, y)
+        x = y
+        y = t
+      end do
+      lcm_of = i1 / x * i2
+    end function lcm_of
+
+
+    ! even, and 2^a 3^b 5^c 7^d
+    logical function fft_friendly(m)
+      integer, intent(in) :: m
+      integer :: r, f
+      fft_friendly = .false.
+      if (mod(m, 2) /= 0) return
+      r = m
+      do f = 2, 7
+        do while (mod(r, f) == 0)
+          r = r / f
+        end do
+      end do
+      fft_friendly = (r == 1)
+    end function fft_friendly
+
+    ! RMS force error estimate over sum(q^2)/sqrt(N)
+    real(wp) function pme_force_error(alpha, mesh, p)
+      real(wp), intent(in) :: alpha
+      integer,  intent(in) :: mesh(3), p
+      real(wp) :: vol, rc, hk, s, recip2, c(0:5)
+      integer  :: kk, m
+      rc  = ene_info%cutoffdist
+      vol = box(1) * box(2) * box(3)
+      if (p == 4) then
+        c(0:3) = [1.0_wp/4320.0_wp, 3.0_wp/1936.0_wp,               &
+                  7601.0_wp/2271360.0_wp, 143.0_wp/28800.0_wp]
+      else
+        c(0:5) = [691.0_wp/68140800.0_wp, 13.0_wp/57600.0_wp,       &
+                  47021.0_wp/35512320.0_wp, 9694607.0_wp/2095994880.0_wp, &
+                  733191589.0_wp/59609088000.0_wp,                  &
+                  326190917.0_wp/11700633600.0_wp]
+      end if
+      recip2 = 0.0_wp
+      do kk = 1, 3
+        hk = box(kk) / real(mesh(kk), wp)
+        s = 0.0_wp
+        do m = 0, p - 1
+          s = s + c(m) * (hk * alpha)**(2*m)
+        end do
+        recip2 = recip2 + ((hk * alpha)**p                               &
+               * sqrt(alpha * box(kk) * sqrt(2.0_wp * PI) * s) / box(kk)**2)**2
+      end do
+      pme_force_error = sqrt((2.0_wp * exp(-(alpha * rc)**2)            &
+                             / sqrt(rc * vol))**2 + 2.25_wp * recip2 / 3.0_wp)
+    end function pme_force_error
+
+  end subroutine select_pme_grid
 
 end module sp_energy_mod

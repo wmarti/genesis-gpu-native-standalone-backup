@@ -34,6 +34,18 @@ module sp_dynamics_str_mod
     integer             :: rstout_period
     integer             :: stoptr_period
     integer             :: nbupdate_period
+    !> request the device-native core (doc/21_GPU_Native.rst); NO is the stock
+    !! CPU path unchanged
+    logical             :: gpu_resident
+    !> native core: plain steps replayed as CUDA graphs (np > 1)
+    logical             :: gpu_step_graph
+    !> native core: rebuild the pair list before an atom can cross its buffer
+    logical             :: gpu_list_guard
+    !> native core: inter-node transport of the PME mesh, coordinate halo
+    !> and force halo exchanges (GpuRoute*, np > 1)
+    integer             :: gpu_route_mesh
+    integer             :: gpu_route_coord
+    integer             :: gpu_route_force
     integer             :: elec_long_period
     integer             :: iseed
     integer             :: iseed_init_velocity
@@ -76,6 +88,12 @@ module sp_dynamics_str_mod
                                                              'VRES', &
                                                              'PTMS'/)
 
+  integer,      public, parameter :: GpuRouteMPI      = 1
+  integer,      public, parameter :: GpuRouteTHREAD   = 2
+
+  character(*), public, parameter :: GpuRouteTypes(2) = (/'MPI     ', &
+                                                          'THREAD  '/)
+
   integer,      public, parameter :: HmrTargetAll     = 1
   integer,      public, parameter :: HmrTargetSolvent = 2
   integer,      public, parameter :: HmrTargetSolute  = 3
@@ -115,6 +133,12 @@ contains
     dynamics%rstout_period        = 0
     dynamics%stoptr_period        = 0
     dynamics%nbupdate_period      = 0
+    dynamics%gpu_resident         = .false.
+    dynamics%gpu_step_graph       = .false.
+    dynamics%gpu_list_guard       = .false.
+    dynamics%gpu_route_mesh       = GpuRouteMPI
+    dynamics%gpu_route_coord      = GpuRouteMPI
+    dynamics%gpu_route_force      = GpuRouteMPI
     dynamics%elec_long_period     = 0
     dynamics%iseed                = 0
     dynamics%iseed_init_velocity  = 0
