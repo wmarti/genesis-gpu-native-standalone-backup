@@ -35,7 +35,13 @@ NATIVE_CORE_INCS = \
 	gpu_domain.h \
 	gpu_fixed_sum.cuh \
 	gpu_nbcluster.h \
-	gpu_nbcluster_fit.h
+	gpu_nbcluster_fit.h \
+	gpu_layout_schedule.hpp \
+	gpu_mesh_exchange_plan.hpp \
+	gpu_mesh_exchange_session.hpp \
+	gpu_pencil_fft.hpp \
+	gpu_pme_recip.hpp \
+	gpu_pme_recip_numerics.hpp
 libgpucore_a_SOURCES = $(NATIVE_CORE_INCS) \
 	gpu_core.cpp \
 	gpu_core_device.cu \
@@ -43,7 +49,11 @@ libgpucore_a_SOURCES = $(NATIVE_CORE_INCS) \
 	gpu_force.cu \
 	gpu_step.cu \
 	gpu_npt.cu \
-	gpu_remd.cu
+	gpu_remd.cu \
+	gpu_mesh_exchange_session.cu \
+	gpu_pencil_fft.cu \
+	gpu_pme_recip.cu \
+	gpu_pme.cu
 endif
 
 bin_PROGRAMS = spdyn $(PRST_SETUP)
@@ -375,7 +385,11 @@ gpu_nbcluster.o \
 gpu_force.o \
 gpu_step.o \
 gpu_npt.o \
-gpu_remd.o : $(NATIVE_CORE_INCS)
+gpu_remd.o \
+gpu_mesh_exchange_session.o \
+gpu_pencil_fft.o \
+gpu_pme_recip.o \
+gpu_pme.o : $(NATIVE_CORE_INCS)
 endif
 
 prst_setup$(EXEEXT) : $(spdyn_ADDLIB) $(prst_setup_OBJECTS)
