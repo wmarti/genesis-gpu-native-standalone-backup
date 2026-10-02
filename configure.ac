@@ -569,6 +569,22 @@ if test x"${enable_gpu}" = x"yes"; then
 fi
 
 
+## the profiling GPU build
+#
+# Detailed GPU event timing, dependency traces and diagnostic counters for
+# the GPU native core.  The default build keeps the ordinary GENESIS timers.
+AC_ARG_ENABLE([gpu-profile],
+    [AS_HELP_STRING(
+      [--enable-gpu-profile],
+      [build the profiling GPU binary: per-kernel event timing and dependency traces (default = no)])],
+    [],[enable_gpu_profile=no])
+
+if test x"${enable_gpu_profile}" = x"yes"; then
+  AC_DEFINE(GENESIS_GPU_PROFILE, 1, [defined if the profiling GPU build is used.])
+  DEFINED_VARIABLES+=" -DGENESIS_GPU_PROFILE"
+fi
+
+
 ## parallel I/O
 #
 AC_ARG_ENABLE([parallel_IO],
@@ -711,19 +727,19 @@ if test x"${with_cuda}" != x"no"; then
   DEFINED_VARIABLES+=" -DCUDAGPU"
 
   if test x"${FC_ACT}" = x"pgf90"; then
-    OPT_LD_CUDA+="-Mcuda -L${cuda_lib_path} -lcudart -lstdc++"
+    OPT_LD_CUDA+="-Mcuda -L${cuda_lib_path} -lcudart -lcufft -lstdc++"
     OPT_FC_CUDA+="-Mcuda "
     AC_DEFINE(PGICUDA, 1, [defined if pgi and cuda are used.])
     DEFINED_VARIABLES+=" -DPGICUDA"
 
   elif test x"${FC_ACT}" = x"ifort"; then
-    OPT_LD_CUDA+="-L${cuda_lib_path} -lcudart -lstdc++"
+    OPT_LD_CUDA+="-L${cuda_lib_path} -lcudart -lcufft -lstdc++"
 
   elif test x"${FC_ACT}" = x"ifx"; then
-    OPT_LD_CUDA+="-L${cuda_lib_path} -lcudart -lstdc++"
+    OPT_LD_CUDA+="-L${cuda_lib_path} -lcudart -lcufft -lstdc++"
 
   elif test x"${FC_ACT}" = x"gfortran"; then
-    OPT_LD_CUDA+="-L${cuda_lib_path} -lcudart -lstdc++"
+    OPT_LD_CUDA+="-L${cuda_lib_path} -lcudart -lcufft -lstdc++"
 
   else
     AC_MSG_ERROR([CUDA is not allowed])
@@ -759,9 +775,32 @@ if test x"${with_cuda}" != x"no"; then
     fi
   fi
 
+# The native exchange and domain units include mpi.h while nvcc compiles
+# them, so use the active MPI wrapper's include path.
+  MPI_INCLUDE=""
+  for mpi_inc_dir in `${CC} -showme:incdirs 2> /dev/null`; do
+    MPI_INCLUDE="${MPI_INCLUDE} -I${mpi_inc_dir}"
+  done
+  if test x"${MPI_INCLUDE}" = x; then
+    MPI_INCLUDE=`${CC} -show 2> /dev/null | tr ' ' '\n' | grep '^-I' | tr '\n' ' '`
+  fi
+  AC_SUBST(MPI_INCLUDE)
+
 # NVCCFLAG
   NVCCFLAG="-c -g -O3 ${GENCODEFLAG} --ftz=false --prec-div=true --prec-sqrt=true --fmad=true"
   AC_SUBST(NVCCFLAG)
+
+# CUDAINCLUDE: the native core's host translation units include the wire
+# header gpu_core_native.h, which in turn includes <cuda_runtime.h> and
+# <cufft.h> so that the device units can use them.  The host C++ compiler
+# therefore needs the same include directory nvcc gets from its own driver.
+# Only when configure was given a concrete --with-cuda path; otherwise the
+# headers are expected on the compiler's default path.
+  CUDA_INCLUDE=""
+  if test x"${with_cuda}" != x"yes"; then
+    CUDA_INCLUDE="-I${cuda_path}/include"
+  fi
+  AC_SUBST(CUDA_INCLUDE)
 fi
 
 AM_CONDITIONAL(CUDAGPU, test x"${with_cuda}" != x"no")
@@ -1713,9 +1752,12 @@ AC_CONFIG_FILES([Makefile
                 src/lib/Makefile
                 src/lib/qsimulate/Makefile
                 src/lib/json-fortran/Makefile])
-AM_COND_IF([SPDYN],[AC_CONFIG_FILES([src/spdyn/Makefile])])
-AM_COND_IF([ATDYN],[AC_CONFIG_FILES([src/atdyn/Makefile])])
-AM_COND_IF([ANALYSIS],[AC_CONFIG_FILES([src/analysis/Makefile
+# Every optional program directory is configured, built or not: `make dist`
+# recurses into all of them (automake's DIST_SUBDIRS), so each needs its
+# Makefile even when its program is not built (e.g. atdyn with --enable-gpu).
+AC_CONFIG_FILES([src/spdyn/Makefile])
+AC_CONFIG_FILES([src/atdyn/Makefile])
+AC_CONFIG_FILES([src/analysis/Makefile
                 src/analysis/libana/Makefile
                 src/analysis/trj_analysis/Makefile
                 src/analysis/trj_analysis/comcrd_analysis/Makefile
@@ -1768,5 +1810,5 @@ AM_COND_IF([ANALYSIS],[AC_CONFIG_FILES([src/analysis/Makefile
                 src/analysis/utilities/qmmm_generator/Makefile
                 src/analysis/utilities/rpath_generator/Makefile
                 src/analysis/utilities/emmap_generator/Makefile
-                src/analysis/utilities/morph_generator/Makefile])])
+                src/analysis/utilities/morph_generator/Makefile])
 AC_OUTPUT

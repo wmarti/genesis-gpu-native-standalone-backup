@@ -249,93 +249,93 @@ CLEANFILES = $(bin_PROGRAMS) $(spdyn_OBJECTS) $(prst_setup_OBJECTS) *.f90 *~ *.m
 sp_pairlist_fugaku.o : sp_pairlist_fugaku.fpp
 if USEKCOMP
 	cp $*.fpp $*.f90
-	$(FPP) $(PPFLAGS) $(DEFS) $*.f90
+	$(FPP) $(PPFLAGS) $(DEFAULT_INCLUDES) $(DEFS) $*.f90
 	mv $*.cpp.f90 $*.f90
 	$(FC)  $(DEFAULT_INCLUDES) $(INCLUDES) -I../lib $(FCFLAGS_KERNELS_PAIRLIST) -c $*.f90
 else
-	$(FPP) $(PPFLAGS) $(DEFS) $*.fpp $*.f90
+	$(FPP) $(PPFLAGS) $(DEFAULT_INCLUDES) $(DEFS) $*.fpp $*.f90
 	$(FC)  $(DEFAULT_INCLUDES) $(INCLUDES) -I../lib $(FCFLAGS) -c $*.f90
 endif
 
 sp_energy_dihedrals.o : sp_energy_dihedrals.fpp
 if USEKCOMP
 	cp $*.fpp $*.f90
-	$(FPP) $(PPFLAGS) $(DEFS) $*.f90
+	$(FPP) $(PPFLAGS) $(DEFAULT_INCLUDES) $(DEFS) $*.f90
 	mv $*.cpp.f90 $*.f90
 	$(FC)  $(DEFAULT_INCLUDES) $(INCLUDES) -I../lib $(FCFLAGS_DIHEDRAL) -c $*.f90
 else
-	$(FPP) $(PPFLAGS) $(DEFS) $*.fpp $*.f90
+	$(FPP) $(PPFLAGS) $(DEFAULT_INCLUDES) $(DEFS) $*.fpp $*.f90
 	$(FC)  $(DEFAULT_INCLUDES) $(INCLUDES) -I../lib $(FCFLAGS) -c $*.f90
 endif
 
 sp_energy_nonbond_fugaku.o : sp_energy_nonbond_fugaku.fpp
 if USEKCOMP
 	cp $*.fpp $*.f90
-	$(FPP) $(PPFLAGS) $(DEFS) $*.f90
+	$(FPP) $(PPFLAGS) $(DEFAULT_INCLUDES) $(DEFS) $*.f90
 	mv $*.cpp.f90 $*.f90
 	$(FC)  $(DEFAULT_INCLUDES) $(INCLUDES) -I../lib $(FCFLAGS_KERNELS) -c $*.f90
 else
-	$(FPP) $(PPFLAGS) $(DEFS) $*.fpp $*.f90
+	$(FPP) $(PPFLAGS) $(DEFAULT_INCLUDES) $(DEFS) $*.fpp $*.f90
 	$(FC)  $(DEFAULT_INCLUDES) $(INCLUDES) -I../lib $(FCFLAGS) -c $*.f90
 endif
 
 if USEKCOMP
 	cp $*.fpp $*.f90
-	$(FPP) $(PPFLAGS) $(DEFS) $*.f90
+	$(FPP) $(PPFLAGS) $(DEFAULT_INCLUDES) $(DEFS) $*.f90
 	mv $*.cpp.f90 $*.f90
 	$(FC)  $(DEFAULT_INCLUDES) $(INCLUDES) -I../lib $(FCFLAGS_KERNELS) -c $*.f90
 else
-	$(FPP) $(PPFLAGS) $(DEFS) $*.fpp $*.f90
+	$(FPP) $(PPFLAGS) $(DEFAULT_INCLUDES) $(DEFS) $*.fpp $*.f90
 	$(FC)  $(DEFAULT_INCLUDES) $(INCLUDES) -I../lib $(FCFLAGS) -c $*.f90
 endif
 
 sp_energy_pme_noopt_1dalltoall.o : sp_energy_pme_noopt_1dalltoall.fpp 
 if USEKCOMP
 	cp $*.fpp $*.f90
-	$(FPP) $(PPFLAGS) $(DEFS) $*.f90
+	$(FPP) $(PPFLAGS) $(DEFAULT_INCLUDES) $(DEFS) $*.f90
 	mv $*.cpp.f90 $*.f90
 	$(FC)  $(DEFAULT_INCLUDES) $(INCLUDES) -I../lib $(FCFLAGS) -c $*.f90
 else
-	$(FPP) $(PPFLAGS) $(DEFS) $*.fpp $*.f90
+	$(FPP) $(PPFLAGS) $(DEFAULT_INCLUDES) $(DEFS) $*.fpp $*.f90
 	$(FC)  $(DEFAULT_INCLUDES) $(INCLUDES) -I../lib $(FCFLAGS_NOOPT) -c $*.f90
 endif
 
 sp_energy_pme_noopt_2dalltoall.o : sp_energy_pme_noopt_2dalltoall.fpp 
 if USEKCOMP
 	cp $*.fpp $*.f90
-	$(FPP) $(PPFLAGS) $(DEFS) $*.f90
+	$(FPP) $(PPFLAGS) $(DEFAULT_INCLUDES) $(DEFS) $*.f90
 	mv $*.cpp.f90 $*.f90
 	$(FC)  $(DEFAULT_INCLUDES) $(INCLUDES) -I../lib $(FCFLAGS) -c $*.f90
 else
-	$(FPP) $(PPFLAGS) $(DEFS) $*.fpp $*.f90
+	$(FPP) $(PPFLAGS) $(DEFAULT_INCLUDES) $(DEFS) $*.fpp $*.f90
 	$(FC)  $(DEFAULT_INCLUDES) $(INCLUDES) -I../lib $(FCFLAGS_NOOPT) -c $*.f90
 endif
 
 sp_energy_pme_noopt_slab.o : sp_energy_pme_noopt_slab.fpp 
 if USEKCOMP
 	cp $*.fpp $*.f90
-	$(FPP) $(PPFLAGS) $(DEFS) $*.f90
+	$(FPP) $(PPFLAGS) $(DEFAULT_INCLUDES) $(DEFS) $*.f90
 	mv $*.cpp.f90 $*.f90
 	$(FC)  $(DEFAULT_INCLUDES) $(INCLUDES) -I../lib $(FCFLAGS) -c $*.f90
 else
-	$(FPP) $(PPFLAGS) $(DEFS) $*.fpp $*.f90
+	$(FPP) $(PPFLAGS) $(DEFAULT_INCLUDES) $(DEFS) $*.fpp $*.f90
 	$(FC)  $(DEFAULT_INCLUDES) $(INCLUDES) -I../lib $(FCFLAGS_NOOPT) -c $*.f90
 endif
 
 .fpp.o:
 if USEKCOMP
 	cp $*.fpp $*.f90
-	$(FPP) $(PPFLAGS) $(DEFS) $*.f90
+	$(FPP) $(PPFLAGS) $(DEFAULT_INCLUDES) $(DEFS) $*.f90
 	mv $*.cpp.f90 $*.f90
 	$(FC)  $(DEFAULT_INCLUDES) $(INCLUDES) -I../lib $(FCFLAGS) -c $*.f90
 else
-	$(FPP) $(PPFLAGS) $(DEFS) $*.fpp $*.f90
-	$(FC)  $(DEFAULT_INCLUDES) $(INCLUDES) -I../lib $(FCFLAGS) -c $*.f90
+	$(FPP) $(PPFLAGS) $(DEFAULT_INCLUDES) $(DEFS) $*.fpp $*.f90
+	$(FC)  $(DEFAULT_INCLUDES) $(INCLUDES) -I../lib $(FCFLAGS) -c $*.f90 -o $@
 endif
 
 if CUDAGPU
 .cu.o:
-	$(NVCC) $(NVCCFLAG) --ptxas-options=-v -lineinfo $*.cu
+	$(NVCC) $(NVCCFLAG) $(DEFAULT_INCLUDES) $(MPI_INCLUDE) $(DEFS) --ptxas-options=-v -lineinfo $< -o $@
 endif
 
 spdyn$(EXEEXT) : $(spdyn_ADDLIB) $(spdyn_OBJECTS)
