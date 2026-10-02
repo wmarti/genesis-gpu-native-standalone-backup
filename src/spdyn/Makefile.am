@@ -53,7 +53,11 @@ libgpucore_a_SOURCES = $(NATIVE_CORE_INCS) \
 	gpu_mesh_exchange_session.cu \
 	gpu_pencil_fft.cu \
 	gpu_pme_recip.cu \
-	gpu_pme.cu
+	gpu_pme.cu \
+	gpu_xchg.cu \
+	gpu_domain.cu \
+	gpu_rebuild.cu \
+	gpu_migration.cu
 endif
 
 bin_PROGRAMS = spdyn $(PRST_SETUP)
@@ -389,7 +393,11 @@ gpu_remd.o \
 gpu_mesh_exchange_session.o \
 gpu_pencil_fft.o \
 gpu_pme_recip.o \
-gpu_pme.o : $(NATIVE_CORE_INCS)
+gpu_pme.o \
+gpu_xchg.o \
+gpu_domain.o \
+gpu_rebuild.o \
+gpu_migration.o : $(NATIVE_CORE_INCS)
 endif
 
 prst_setup$(EXEEXT) : $(spdyn_ADDLIB) $(prst_setup_OBJECTS)
