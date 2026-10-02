@@ -21,6 +21,31 @@ else
   PRST_SETUP=
 endif
 
+# Units of the GPU native core, compiled into a convenience archive until
+# the dispatch to the native core links them into spdyn.
+if CUDAGPU
+AM_CPPFLAGS = $(CUDA_INCLUDE)
+noinst_LIBRARIES = libgpucore.a
+libgpucore_a_AR = $(AR) $(ARFLAGS) cr
+NATIVE_CORE_INCS = \
+	gpu_core_abi.h \
+	gpu_core_internal.h \
+	gpu_core_native.h \
+	gpu_core_xchg.h \
+	gpu_domain.h \
+	gpu_fixed_sum.cuh \
+	gpu_nbcluster.h \
+	gpu_nbcluster_fit.h
+libgpucore_a_SOURCES = $(NATIVE_CORE_INCS) \
+	gpu_core.cpp \
+	gpu_core_device.cu \
+	gpu_nbcluster.cu \
+	gpu_force.cu \
+	gpu_step.cu \
+	gpu_npt.cu \
+	gpu_remd.cu
+endif
+
 bin_PROGRAMS = spdyn $(PRST_SETUP)
 
 spdyn_SOURCES = \
@@ -341,6 +366,17 @@ endif
 spdyn$(EXEEXT) : $(spdyn_ADDLIB) $(spdyn_OBJECTS)
 	$(FC) -o spdyn $(spdyn_OBJECTS) \
 		$(spdyn_ADDLIB) $(LDFLAGS)
+
+if CUDAGPU
+# every native object depends on every native header
+gpu_core.o \
+gpu_core_device.o \
+gpu_nbcluster.o \
+gpu_force.o \
+gpu_step.o \
+gpu_npt.o \
+gpu_remd.o : $(NATIVE_CORE_INCS)
+endif
 
 prst_setup$(EXEEXT) : $(spdyn_ADDLIB) $(prst_setup_OBJECTS)
 	$(FC) -o prst_setup $(prst_setup_OBJECTS) \
