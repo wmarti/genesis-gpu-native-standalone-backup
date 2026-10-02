@@ -35,6 +35,20 @@ def getdirs(path):
     test_dirs.sort()
     return test_dirs
 
+# nonbond_precision = MIXED with the analytic pair term (any ewald_evaluation
+# but TABLE) has no table interpolation error, so it is graded against
+# ref_fine where a test has one (see README_ref_fine)
+def is_mixed_analytic(output):
+    mixed = False
+    table = False
+    with open(output) as f:
+        for line in f:
+            if re.match(r'^  nonbond_precision = +mixed', line):
+                mixed = True
+            if re.match(r'^  ewald_evaluation = +table', line):
+                table = True
+    return mixed and not table
+
 ############### MAIN ########################################
 
 ###### initialization
@@ -254,6 +268,8 @@ if (is_atdyn or is_spdyn) and (not is_parallelio):
         test.read(testname)
 
         refname = "ref"
+        if is_spdyn and is_mixed_analytic(testname) and os.path.exists("ref_fine"):
+            refname = "ref_fine"
         tolerance_cur = tolerance
         if test.is_single and is_spdyn:
             tolerance_cur = tolerance_single

@@ -1,0 +1,39 @@
+ref_fine: references for SPDYN's analytic nonbonded pair term
+==============================================================
+
+The ref files hold double-precision energies computed with GENESIS's
+lookup table at the default density (table_density = 20).  Under
+
+  [ENERGY]
+  nonbond_precision = MIXED
+
+the native GPU core evaluates Ewald real space and Lennard-Jones in closed
+form (ewald_evaluation = ANALYTIC, the default where the table has that
+form), so it has no table interpolation error.  It therefore departs from
+ref by the interpolation error of the density-20 table, which on some tests
+exceeds tolerance_single (for example 1.2e-4 in dppc VDWAALS).
+
+ref_fine is the same test run by the double-precision CPU code with a
+finer table:
+
+  [ENERGY]
+  table_density = 2000
+
+At that density the interpolation error is about 1e-4 of the default's, so
+ref_fine carries the model, not the table.  Nothing else in the input
+changes.
+
+test.py grades a run against ref_fine when the run's output shows
+nonbond_precision = MIXED and not ewald_evaluation = TABLE, and the test
+has a ref_fine file.  Every other run, and every test without ref_fine, is
+graded against ref as before.  The tolerances are unchanged (MIXED runs
+report precision = mixed and use tolerance_single).
+
+The 1-4 terms read the default-density table in every mode, so a MIXED
+run keeps their interpolation error (up to 1.2e-5 in VDWAALS on these
+tests); it is within tolerance_single.
+
+ref_fine files exist only for the tests whose MIXED run departs from ref
+by more than tolerance_single: the dppc PME tests (PME_*, VVER_*, VRES_*),
+jac_param27/PME_FSW, nano_material/VVER_NPT_BUSSI1 and pops/PME.  Every
+other test is graded against ref.
